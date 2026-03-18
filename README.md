@@ -8,6 +8,7 @@
 
 - [How It Works](#how-it-works)
 - [Installation](#installation)
+- [Usage](#usage)
 - [Commands](#commands)
 - [Handlers](#handlers)
 - [Pipeline (Unknown Commands)](#pipeline-unknown-commands)
@@ -87,6 +88,81 @@ ccr gain              # shows a run recorded
 `ccr init` writes `~/.claude/hooks/ccr-rewrite.sh` (PreToolUse) and merges both hook entries into `settings.json` **without removing existing hooks** from other tools.
 
 > **First run note:** CCR downloads the BERT model (~90 MB, `all-MiniLM-L6-v2`) from HuggingFace on first use and caches it at `~/.cache/huggingface/`. Subsequent runs are instant.
+
+---
+
+## Usage
+
+After `ccr init`, **everything is automatic** — no changes to how you use Claude Code.
+
+### Zero-config workflow
+
+CCR hooks into Claude Code at two points:
+
+**1. Before a command runs (PreToolUse)** — known commands are transparently rewritten:
+```
+Claude runs: cargo build
+             ↓ rewritten to: ccr run cargo build
+             ↓ output filtered before Claude reads it
+```
+
+**2. After any command runs (PostToolUse)** — unknown commands get BERT compression:
+```
+Claude runs: some-custom-tool --flag
+             ↓ output passed through BERT pipeline
+             ↓ ~40% savings on anything
+```
+
+You don't invoke `ccr` directly in normal use. Just work with Claude Code as usual.
+
+### Check your savings
+
+```bash
+ccr gain
+```
+```
+CCR Token Savings
+═════════════════════════════════════════════════
+  Runs:           142
+  Tokens saved:   182.2k  (77.7%)
+  Cost saved:     ~$0.547  (at $3.00/1M input tokens)
+  Today:          23 runs · 31.4k saved · 74.3%
+
+Per-Command Breakdown
+─────────────────────────────────────────────────────────────
+COMMAND        RUNS       SAVED   SAVINGS   AVG ms  IMPACT
+─────────────────────────────────────────────────────────────
+cargo            45       89.2k     87.2%      420  ████████████████████
+git              31       41.1k     79.1%       82  ████████████████
+curl             12       31.2k     94.3%      210  ██████████████████
+(pipeline)       18       12.4k     42.1%        —  ████████
+```
+
+### Find missed opportunities
+
+```bash
+ccr discover
+```
+
+Scans your Claude Code session history for Bash commands that ran without CCR. Shows which commands could have been filtered and the estimated tokens that would have been saved.
+
+### Pipe arbitrary output manually
+
+```bash
+cargo clippy 2>&1 | ccr filter --command cargo
+kubectl get pods -A 2>&1 | ccr filter --command kubectl
+cat big-log-file.txt | ccr filter
+```
+
+### Recover full output
+
+When CCR compresses aggressively (>60% savings), it appends the path to the raw output:
+```
+error[E0308]: mismatched types → src/main.rs:42
+[full output: ~/.local/share/ccr/tee/1742198400_cargo.log]
+```
+
+Claude can `cat` that path to see the unfiltered output without re-running the command.
 
 ---
 
