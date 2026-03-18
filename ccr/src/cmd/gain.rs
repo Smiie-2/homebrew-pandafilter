@@ -71,8 +71,8 @@ fn print_summary(records: &[Analytics]) {
         overall_pct
     );
     println!(
-        "  Cost saved:     ~${:.3}  (at $3.00/1M input tokens)",
-        cost_saved
+        "  Cost saved:     ~{}  (at $3.00/1M input tokens)",
+        fmt_cost(cost_saved)
     );
 
     if !today.is_empty() {
@@ -222,7 +222,7 @@ fn print_history(records: &[Analytics], days: u32) {
         let cost_str = if stats.count == 0 {
             "—".to_string()
         } else {
-            format!("${:.3}", cost)
+            fmt_cost(cost)
         };
         println!(
             "{:<12}  {:>5}  {:>12}  {:>8}  {:>10}",
@@ -242,7 +242,7 @@ fn print_history(records: &[Analytics], days: u32) {
         total_count,
         fmt_tokens(total_saved),
         format!("{:.1}%", savings_pct(total_input, total_output)),
-        format!("${:.3}", total_cost)
+        fmt_cost(total_cost)
     );
 
     // Top commands over the period
@@ -311,6 +311,18 @@ fn savings_pct(input: usize, output: usize) -> f32 {
     }
     let saved = input.saturating_sub(output);
     (saved as f32 / input as f32) * 100.0
+}
+
+fn fmt_cost(dollars: f64) -> String {
+    if dollars < 0.0001 {
+        format!("<$0.0001")
+    } else if dollars < 0.01 {
+        format!("${:.4}", dollars)
+    } else if dollars < 1.0 {
+        format!("${:.3}", dollars)
+    } else {
+        format!("${:.2}", dollars)
+    }
 }
 
 fn fmt_tokens(n: usize) -> String {
