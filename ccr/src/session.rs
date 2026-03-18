@@ -31,6 +31,11 @@ pub struct SessionState {
     pub total_turns: usize,
     /// Cumulative filtered tokens emitted in this session.
     pub total_tokens: usize,
+    /// Per-command centroid: rolling mean of filtered-output embeddings for each command.
+    /// Used by Idea 7 (historical centroid scoring) to measure what's genuinely new
+    /// vs what a normal run of this command always produces.
+    #[serde(default)]
+    pub command_centroids: std::collections::HashMap<String, Vec<f32>>,
 }
 
 pub struct SessionHit {
@@ -134,6 +139,130 @@ impl SessionState {
         if self.entries.len() > MAX_ENTRIES {
             self.entries.remove(0);
         }
+    }
+}
+
+// ── Per-command historical centroid (Idea 7) ─────────────────────────────────
+
+impl SessionState {
+    /// Returns the rolling-mean centroid for this command, if any runs have been recorded.
+    pub fn command_centroid(&self, cmd: &str) -> Option<&Vec<f32>> {
+        self.command_centroids.get(cmd)
+    }
+
+    /// Update the per-command centroid with a new observation.
+    /// Uses a simple running mean: new_centroid = (old * n + new) / (n + 1),
+    /// where n is the number of prior entries for this command.
+    pub fn update_command_centroid(&mut self, cmd: &str, new_centroid: Vec<f32>) {
+        let prior_count = self.entries.iter().filter(|e| e.cmd == cmd).count() as f32;
+
+        let updated = match self.command_centroids.get(cmd) {
+            None => new_centroid,
+            Some(old) if prior_count <= 0.0 => new_centroid,
+            Some(old) => {
+                let n = prior_count;
+                let np1 = n + 1.0;
+                old.iter()
+                    .zip(new_centroid.iter())
+                    .map(|(o, nc)| (o * n + nc) / np1)
+                    .collect()
+            }
+        };
+
+        self.command_centroids.insert(cmd.to_string(), updated);
+    }
+}
+
+// ── Semantic delta compression (Idea 3) ──────────────────────────────────────
+
+/// Threshold for delta matching: lower than B3 (0.92) so that iterative
+/// workflows (cargo build N times) get delta treatment even when outputs are
+/// only moderately similar.
+const DELTA_THRESHOLD: f32 = 0.55;
+
+/// Result of a semantic delta comparison between a new output and a prior run.
+pub struct DeltaResult {
+    /// Compressed output showing only new/changed lines plus a back-reference.
+    pub output: String,
+    /// Number of new output lines not semantically matched to the prior run.
+    pub new_count: usize,
+    /// Number of new output lines matched (suppressed) by the prior run.
+    pub same_count: usize,
+    /// Turn number of the prior run this delta references.
+    pub reference_turn: usize,
+}
+
+impl SessionState {
+    /// Compare `new_lines` against recent entries for the same `cmd`.
+    ///
+    /// Returns `Some(DeltaResult)` when a prior run is found with overall
+    /// embedding similarity ≥ DELTA_THRESHOLD.  Lines semantically matched
+    /// to prior output are suppressed; genuinely new lines are surfaced.
+    pub fn compute_delta(
+        &self,
+        cmd: &str,
+        new_lines: &[&str],
+        new_embedding: &[f32],
+    ) -> Option<DeltaResult> {
+        // Find the most recent entry for the same command within delta range
+        let prior = self
+            .entries
+            .iter()
+            .filter(|e| e.cmd == cmd && !e.embedding.is_empty())
+            .rev()
+            .find(|e| {
+                let sim = cosine_sim(new_embedding, &e.embedding);
+                sim >= DELTA_THRESHOLD
+            })?;
+
+        // Re-embed each new line and compare against the prior content preview.
+        // Lines with high similarity to any sentence in the prior output are "same".
+        let model = ccr_core::summarizer::embed_batch(new_lines).ok()?;
+
+        // Embed sentences from prior content for line-level comparison
+        let prior_sentences: Vec<&str> = prior.content_preview.lines().collect();
+        if prior_sentences.is_empty() {
+            return None;
+        }
+        let prior_embs = ccr_core::summarizer::embed_batch(&prior_sentences).ok()?;
+
+        const LINE_MATCH_THRESHOLD: f32 = 0.88;
+        let mut new_lines_out: Vec<String> = Vec::new();
+        let mut same_count = 0usize;
+        let mut new_count = 0usize;
+
+        for (i, line) in new_lines.iter().enumerate() {
+            let line_emb = &model[i];
+            let best_sim = prior_embs
+                .iter()
+                .map(|pe| cosine_sim(line_emb, pe))
+                .fold(0.0f32, f32::max);
+
+            if best_sim >= LINE_MATCH_THRESHOLD {
+                same_count += 1;
+            } else {
+                new_count += 1;
+                new_lines_out.push((*line).to_string());
+            }
+        }
+
+        let ref_marker = format!(
+            "[{} lines same as turn {} — {} tokens saved]",
+            same_count, prior.turn, prior.tokens
+        );
+
+        let mut output_parts: Vec<String> = Vec::new();
+        if same_count > 0 {
+            output_parts.push(ref_marker);
+        }
+        output_parts.extend(new_lines_out);
+
+        Some(DeltaResult {
+            output: output_parts.join("\n"),
+            new_count,
+            same_count,
+            reference_turn: prior.turn,
+        })
     }
 }
 

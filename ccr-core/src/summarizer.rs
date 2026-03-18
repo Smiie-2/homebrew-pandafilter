@@ -77,6 +77,135 @@ pub fn summarize(text: &str, budget_lines: usize) -> SummarizeResult {
     SummarizeResult { output, lines_in, lines_out, omitted }
 }
 
+/// Intent-aware summarization: blends command query (30%) with the user's current
+/// task intent (70%) so that output lines relevant to what Claude is actually working
+/// on score higher than lines that are merely relevant to the command name.
+///
+/// `command` — the raw command string (e.g. "cargo build")
+/// `intent`  — last assistant message describing the current task goal
+///
+/// Falls back to `summarize_with_query(command)` when `intent` is empty.
+pub fn summarize_with_intent(
+    text: &str,
+    budget_lines: usize,
+    command: &str,
+    intent: &str,
+) -> SummarizeResult {
+    if intent.trim().is_empty() {
+        return summarize_with_query(text, budget_lines, command);
+    }
+
+    let lines: Vec<&str> = text.lines().collect();
+    let lines_in = lines.len();
+
+    let output = match summarize_semantic_intent(&lines, budget_lines, command, intent) {
+        Ok(result) => result,
+        Err(_) => summarize_headtail(&lines, budget_lines),
+    };
+
+    let lines_out = output.lines().count();
+    let omitted = lines_in.saturating_sub(lines_out);
+    SummarizeResult { output, lines_in, lines_out, omitted }
+}
+
+fn summarize_semantic_intent(
+    lines: &[&str],
+    budget: usize,
+    command: &str,
+    intent: &str,
+) -> anyhow::Result<String> {
+    let total = lines.len();
+    let budget = budget.min(total);
+
+    let indexed_lines: Vec<(usize, &str)> = lines
+        .iter()
+        .enumerate()
+        .filter(|(_, l)| !l.trim().is_empty())
+        .map(|(i, l)| (i, *l))
+        .collect();
+
+    if indexed_lines.is_empty() {
+        return Ok(lines.join("\n"));
+    }
+
+    let model = get_model()?;
+
+    // Embed lines + command + intent in one batch
+    let mut texts: Vec<&str> = indexed_lines.iter().map(|(_, l)| *l).collect();
+    texts.push(command);
+    texts.push(intent);
+
+    let all_embeddings = model.embed(texts, None)?;
+    let n = indexed_lines.len();
+    let cmd_emb = &all_embeddings[n];
+    let intent_emb = &all_embeddings[n + 1];
+    let embeddings = &all_embeddings[..n];
+
+    // Blend: 30% command relevance + 70% intent relevance
+    let dim = cmd_emb.len();
+    let blended_query: Vec<f32> = (0..dim)
+        .map(|i| 0.30 * cmd_emb[i] + 0.70 * intent_emb[i])
+        .collect();
+
+    let centroid = compute_centroid(embeddings);
+
+    let scored: Vec<(usize, f32)> = indexed_lines
+        .iter()
+        .zip(embeddings.iter())
+        .map(|((orig_idx, _), emb)| {
+            let anomaly = 1.0 - cosine_similarity(emb, &centroid);
+            let relevance = cosine_similarity(emb, &blended_query);
+            (*orig_idx, 0.5 * anomaly + 0.5 * relevance)
+        })
+        .collect();
+
+    // Hard-keep critical lines
+    let mut selected: std::collections::HashSet<usize> = std::collections::HashSet::new();
+    for (orig_idx, line) in lines.iter().enumerate() {
+        if critical_pattern().is_match(line) {
+            selected.insert(orig_idx);
+        }
+    }
+
+    let max_score = scored.iter().map(|(_, s)| *s).fold(0.0f32, f32::max);
+    let score_threshold = max_score * 0.30;
+
+    let mut ranked = scored.clone();
+    ranked.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+
+    for (orig_idx, score) in &ranked {
+        if selected.len() >= budget { break; }
+        if *score < score_threshold { break; }
+        selected.insert(*orig_idx);
+    }
+
+    let mut kept: Vec<usize> = selected.into_iter().collect();
+    kept.sort();
+
+    let mut result: Vec<String> = Vec::new();
+    let mut prev_idx: Option<usize> = None;
+    for idx in &kept {
+        if let Some(prev) = prev_idx {
+            let gap = idx - prev - 1;
+            if gap > 0 {
+                result.push(format!("[... {} lines omitted ...]", gap));
+            }
+        } else if *idx > 0 {
+            result.push(format!("[... {} lines omitted ...]", idx));
+        }
+        result.push(lines[*idx].to_string());
+        prev_idx = Some(*idx);
+    }
+    if let Some(last) = prev_idx {
+        let trailing = total - last - 1;
+        if trailing > 0 {
+            result.push(format!("[... {} lines omitted ...]", trailing));
+        }
+    }
+
+    Ok(result.join("\n"))
+}
+
 /// Query-biased summarization: combines anomaly scoring with relevance to `query`.
 /// Lines that are both unusual AND relevant to the current task score highest.
 pub fn summarize_with_query(text: &str, budget_lines: usize, query: &str) -> SummarizeResult {
@@ -215,6 +344,221 @@ fn summarize_headtail(lines: &[&str], budget: usize) -> String {
         result.extend(lines[total.saturating_sub(tail)..].iter().map(|l| l.to_string()));
     }
     result.join("\n")
+}
+
+// ── Contextual anchoring ──────────────────────────────────────────────────────
+
+/// Anomaly-based summarization with contextual anchoring.
+///
+/// After selecting the high-anomaly lines to keep, also keeps up to
+/// `anchor_neighbors` semantically nearest lines for each anomaly, so that
+/// errors appear alongside the function signatures / file pointers that give
+/// them context. `anchor_neighbors = 0` is identical to plain `summarize`.
+pub fn summarize_with_anchoring(
+    text: &str,
+    budget_lines: usize,
+    anchor_neighbors: usize,
+) -> SummarizeResult {
+    let lines: Vec<&str> = text.lines().collect();
+    let lines_in = lines.len();
+
+    if lines_in == 0 {
+        return SummarizeResult { output: String::new(), lines_in: 0, lines_out: 0, omitted: 0 };
+    }
+
+    let output = match summarize_semantic_anchored(&lines, budget_lines, anchor_neighbors) {
+        Ok(s) => s,
+        Err(_) => summarize_headtail(&lines, budget_lines),
+    };
+
+    let lines_out = output.lines().count();
+    let omitted = lines_in.saturating_sub(lines_out);
+    SummarizeResult { output, lines_in, lines_out, omitted }
+}
+
+fn summarize_semantic_anchored(
+    lines: &[&str],
+    budget: usize,
+    anchor_neighbors: usize,
+) -> anyhow::Result<String> {
+    let total = lines.len();
+    let budget = budget.min(total);
+
+    let indexed_lines: Vec<(usize, &str)> = lines
+        .iter()
+        .enumerate()
+        .filter(|(_, l)| !l.trim().is_empty())
+        .map(|(i, l)| (i, *l))
+        .collect();
+
+    if indexed_lines.is_empty() {
+        return Ok(lines.join("\n"));
+    }
+
+    let model = get_model()?;
+    let texts: Vec<&str> = indexed_lines.iter().map(|(_, l)| *l).collect();
+    let embeddings = model.embed(texts, None)?;
+    let n = indexed_lines.len();
+
+    let centroid = compute_centroid(&embeddings);
+
+    let scored: Vec<(usize, f32)> = indexed_lines
+        .iter()
+        .zip(embeddings.iter())
+        .map(|((orig_idx, _), emb)| (*orig_idx, 1.0 - cosine_similarity(emb, &centroid)))
+        .collect();
+
+    // Hard-keep critical lines
+    let mut selected: std::collections::HashSet<usize> = std::collections::HashSet::new();
+    for (orig_idx, line) in lines.iter().enumerate() {
+        if critical_pattern().is_match(line) {
+            selected.insert(orig_idx);
+        }
+    }
+
+    let max_score = scored.iter().map(|(_, s)| *s).fold(0.0f32, f32::max);
+    let score_threshold = max_score * 0.40;
+
+    let mut ranked = scored.clone();
+    ranked.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+
+    // First pass: select anomalous lines up to budget
+    let mut anomaly_selected: std::collections::HashSet<usize> = selected.clone();
+    for (orig_idx, score) in &ranked {
+        if anomaly_selected.len() >= budget { break; }
+        if *score < score_threshold { break; }
+        anomaly_selected.insert(*orig_idx);
+    }
+
+    // Second pass: for each anomaly-selected line, find its nearest neighbors
+    // and add them as context anchors (up to anchor_neighbors per anomaly line).
+    if anchor_neighbors > 0 {
+        // Build a map from orig_idx to embedding index in `indexed_lines`
+        let orig_to_emb_idx: std::collections::HashMap<usize, usize> = indexed_lines
+            .iter()
+            .enumerate()
+            .map(|(i, (orig, _))| (*orig, i))
+            .collect();
+
+        let anomaly_orig: Vec<usize> = anomaly_selected.iter().copied().collect();
+        for anom_orig in &anomaly_orig {
+            if let Some(&anom_emb_idx) = orig_to_emb_idx.get(anom_orig) {
+                let anom_emb = &embeddings[anom_emb_idx];
+
+                // Score all non-selected lines by similarity to this anomaly
+                let mut candidates: Vec<(usize, f32)> = indexed_lines
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, (orig, _))| !anomaly_selected.contains(orig))
+                    .map(|(i, (orig, _))| (*orig, cosine_similarity(&embeddings[i], anom_emb)))
+                    .collect();
+                candidates.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+
+                for (orig_idx, _) in candidates.iter().take(anchor_neighbors) {
+                    if selected.len() + anomaly_selected.len() >= budget * 2 {
+                        break;
+                    }
+                    anomaly_selected.insert(*orig_idx);
+                }
+            }
+        }
+    }
+
+    selected = anomaly_selected;
+
+    let mut kept: Vec<usize> = selected.into_iter().collect();
+    kept.sort();
+
+    let mut result: Vec<String> = Vec::new();
+    let mut prev_idx: Option<usize> = None;
+    for idx in &kept {
+        if let Some(prev) = prev_idx {
+            let gap = idx - prev - 1;
+            if gap > 0 {
+                result.push(format!("[... {} lines omitted ...]", gap));
+            }
+        } else if *idx > 0 {
+            result.push(format!("[... {} lines omitted ...]", idx));
+        }
+        result.push(lines[*idx].to_string());
+        prev_idx = Some(*idx);
+    }
+    if let Some(last) = prev_idx {
+        let trailing = total - last - 1;
+        if trailing > 0 {
+            result.push(format!("[... {} lines omitted ...]", trailing));
+        }
+    }
+
+    Ok(result.join("\n"))
+}
+
+// ── Semantic entropy & entropy-adjusted budget ────────────────────────────────
+
+/// Computes the mean distance of each embedding from the centroid.
+/// Returns 0.0 for empty or single-element input.
+/// High entropy → diverse content; low entropy → near-uniform/repetitive content.
+pub fn semantic_entropy(embeddings: &[Vec<f32>]) -> f32 {
+    if embeddings.len() <= 1 {
+        return 0.0;
+    }
+    let centroid = compute_centroid(embeddings);
+    let mean_dist: f32 = embeddings
+        .iter()
+        .map(|e| 1.0 - cosine_similarity(e, &centroid))
+        .sum::<f32>()
+        / embeddings.len() as f32;
+    mean_dist
+}
+
+/// Returns a line budget adjusted by the semantic entropy of the input text.
+///
+/// Low-entropy input (repetitive/uniform lines) receives a tightly reduced budget
+/// even early in the session — no need to show 50 near-identical "downloading…"
+/// lines when 3 would convey the same information.
+///
+/// High-entropy input (diverse errors, warnings, types) receives the full budget.
+///
+/// If the input is below the summarize threshold (200 lines by default), the
+/// full `max_budget` is returned unchanged.
+pub fn entropy_adjusted_budget(text: &str, max_budget: usize) -> usize {
+    const THRESHOLD_LINES: usize = 200;
+    const LOW_ENTROPY_CUTOFF: f32 = 0.10;  // below this → max compression
+    const HIGH_ENTROPY_CUTOFF: f32 = 0.35; // above this → full budget
+
+    let lines: Vec<&str> = text.lines().filter(|l| !l.trim().is_empty()).collect();
+    if lines.len() < THRESHOLD_LINES {
+        return max_budget;
+    }
+
+    let model = match get_model() {
+        Ok(m) => m,
+        Err(_) => return max_budget,
+    };
+
+    // Sample up to 100 lines evenly to avoid O(N²) cost on huge inputs
+    let step = (lines.len() / 100).max(1);
+    let sample: Vec<&str> = lines.iter().step_by(step).copied().collect();
+
+    let embeddings = match model.embed(sample, None) {
+        Ok(e) => e,
+        Err(_) => return max_budget,
+    };
+
+    let entropy = semantic_entropy(&embeddings);
+
+    // Linear interpolation between low and high cutoffs
+    if entropy <= LOW_ENTROPY_CUTOFF {
+        // Maximally repetitive — collapse to ~5% of budget (min 1)
+        ((max_budget as f32 * 0.05) as usize).max(1)
+    } else if entropy >= HIGH_ENTROPY_CUTOFF {
+        max_budget
+    } else {
+        // Interpolate: 5% → 100% of max_budget
+        let t = (entropy - LOW_ENTROPY_CUTOFF) / (HIGH_ENTROPY_CUTOFF - LOW_ENTROPY_CUTOFF);
+        let fraction = 0.05 + t * 0.95;
+        ((max_budget as f32 * fraction) as usize).max(1)
+    }
 }
 
 // ── Sentence-level summarization (conversation messages) ─────────────────────
@@ -369,6 +713,308 @@ fn summarize_sentences_headtail(sentences: &[String], budget: usize) -> String {
         }
     }
     result.join(" ")
+}
+
+// ── Semantic line clustering ──────────────────────────────────────────────────
+
+const CLUSTER_SIM_THRESHOLD: f32 = 0.85;
+
+/// Cluster-based summarization: groups near-duplicate lines into clusters and
+/// keeps one representative per cluster plus a `[N similar]` marker.
+/// Critical lines (errors/warnings) are always represented in the output.
+pub fn summarize_with_clustering(text: &str, budget_lines: usize) -> SummarizeResult {
+    let lines: Vec<&str> = text.lines().collect();
+    let lines_in = lines.len();
+
+    if lines_in == 0 {
+        return SummarizeResult { output: String::new(), lines_in: 0, lines_out: 0, omitted: 0 };
+    }
+
+    let output = match do_cluster_summarize(&lines, budget_lines) {
+        Ok(s) => s,
+        Err(_) => summarize_headtail(&lines, budget_lines),
+    };
+
+    let lines_out = output.lines().count();
+    let omitted = lines_in.saturating_sub(lines_out);
+    SummarizeResult { output, lines_in, lines_out, omitted }
+}
+
+fn do_cluster_summarize(lines: &[&str], budget: usize) -> anyhow::Result<String> {
+    let indexed: Vec<(usize, &str)> = lines
+        .iter()
+        .enumerate()
+        .filter(|(_, l)| !l.trim().is_empty())
+        .map(|(i, l)| (i, *l))
+        .collect();
+
+    if indexed.is_empty() {
+        return Ok(lines.join("\n"));
+    }
+
+    let model = get_model()?;
+    let texts: Vec<&str> = indexed.iter().map(|(_, l)| *l).collect();
+    let embeddings = model.embed(texts, None)?;
+    let n = indexed.len();
+
+    // ── Greedy clustering ────────────────────────────────────────────────────
+    // Each line joins the nearest cluster within threshold, or starts a new one.
+    let mut member_cluster: Vec<usize> = vec![0; n];
+    let mut centroids: Vec<Vec<f32>> = Vec::new();
+    let mut sizes: Vec<usize> = Vec::new();
+
+    for i in 0..n {
+        let emb = &embeddings[i];
+        let best = (0..centroids.len())
+            .map(|cid| (cid, cosine_similarity(emb, &centroids[cid])))
+            .filter(|(_, sim)| *sim >= CLUSTER_SIM_THRESHOLD)
+            .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
+
+        match best {
+            Some((cid, _)) => {
+                let count = sizes[cid] as f32;
+                let nc = count + 1.0;
+                for (j, v) in emb.iter().enumerate() {
+                    centroids[cid][j] = (centroids[cid][j] * count + v) / nc;
+                }
+                sizes[cid] += 1;
+                member_cluster[i] = cid;
+            }
+            None => {
+                let cid = centroids.len();
+                centroids.push(emb.clone());
+                sizes.push(1);
+                member_cluster[i] = cid;
+            }
+        }
+    }
+
+    let num_clusters = centroids.len();
+
+    // ── Pick best representative per cluster (highest anomaly = most distinct) ─
+    let mut reps: Vec<Option<(usize, f32)>> = vec![None; num_clusters];
+    for i in 0..n {
+        let cid = member_cluster[i];
+        let score = 1.0 - cosine_similarity(&embeddings[i], &centroids[cid]);
+        match reps[cid] {
+            None => reps[cid] = Some((i, score)),
+            Some((_, best)) if score > best => reps[cid] = Some((i, score)),
+            _ => {}
+        }
+    }
+
+    // (orig_idx, cluster_size, anomaly_score, is_critical)
+    let cluster_info: Vec<(usize, usize, f32, bool)> = (0..num_clusters)
+        .map(|cid| {
+            let (mi, score) = reps[cid].unwrap_or_else(|| {
+                let first = (0..n).find(|&i| member_cluster[i] == cid).unwrap_or(0);
+                (first, 0.0)
+            });
+            let orig_idx = indexed[mi].0;
+            let is_crit = critical_pattern().is_match(indexed[mi].1);
+            (orig_idx, sizes[cid], score, is_crit)
+        })
+        .collect();
+
+    // ── Budget selection ─────────────────────────────────────────────────────
+    // Critical cluster reps are always kept; non-critical sorted by score.
+    let critical: Vec<_> = cluster_info.iter().filter(|c| c.3).collect();
+    let mut normal: Vec<_> = cluster_info.iter().filter(|c| !c.3).collect();
+    normal.sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap_or(std::cmp::Ordering::Equal));
+
+    let normal_budget = budget.saturating_sub(critical.len());
+    let mut selected: Vec<(usize, usize)> = Vec::new(); // (orig_idx, cluster_size)
+    for c in &critical {
+        selected.push((c.0, c.1));
+    }
+    for c in normal.iter().take(normal_budget) {
+        selected.push((c.0, c.1));
+    }
+
+    selected.sort_by_key(|(idx, _)| *idx);
+
+    // ── Build output ─────────────────────────────────────────────────────────
+    let mut result: Vec<String> = Vec::new();
+    for (orig_idx, size) in &selected {
+        result.push(lines[*orig_idx].to_string());
+        if *size > 1 {
+            result.push(format!("[{} similar]", size - 1));
+        }
+    }
+
+    Ok(result.join("\n"))
+}
+
+// ── Historical-centroid summarization (Idea 7) ───────────────────────────────
+
+/// Anomaly-based summarization scored against a **historical** centroid rather
+/// than the current batch's centroid.
+///
+/// Lines that diverge from what this command *usually* produces are kept;
+/// lines that look like every other run are suppressed. Critical lines are
+/// always kept. Falls back to plain `summarize` when `historical_centroid` is
+/// all-zeros (empty/uninitialized).
+pub fn summarize_against_centroid(
+    text: &str,
+    budget_lines: usize,
+    historical_centroid: &[f32],
+) -> SummarizeResult {
+    let lines: Vec<&str> = text.lines().collect();
+    let lines_in = lines.len();
+
+    if lines_in == 0 {
+        return SummarizeResult { output: String::new(), lines_in: 0, lines_out: 0, omitted: 0 };
+    }
+
+    // Fall back to plain summarize if centroid is empty or all-zeros
+    let centroid_magnitude: f32 = historical_centroid.iter().map(|v| v * v).sum::<f32>().sqrt();
+    if historical_centroid.is_empty() || centroid_magnitude < 1e-6 {
+        return summarize(text, budget_lines);
+    }
+
+    let output = match summarize_against_centroid_inner(&lines, budget_lines, historical_centroid) {
+        Ok(s) => s,
+        Err(_) => summarize_headtail(&lines, budget_lines),
+    };
+
+    let lines_out = output.lines().count();
+    let omitted = lines_in.saturating_sub(lines_out);
+    SummarizeResult { output, lines_in, lines_out, omitted }
+}
+
+fn summarize_against_centroid_inner(
+    lines: &[&str],
+    budget: usize,
+    historical_centroid: &[f32],
+) -> anyhow::Result<String> {
+    let total = lines.len();
+    let budget = budget.min(total);
+
+    let indexed_lines: Vec<(usize, &str)> = lines
+        .iter()
+        .enumerate()
+        .filter(|(_, l)| !l.trim().is_empty())
+        .map(|(i, l)| (i, *l))
+        .collect();
+
+    if indexed_lines.is_empty() {
+        return Ok(lines.join("\n"));
+    }
+
+    let model = get_model()?;
+    let texts: Vec<&str> = indexed_lines.iter().map(|(_, l)| *l).collect();
+    let embeddings = model.embed(texts, None)?;
+
+    // Score anomaly against the historical centroid (not the current batch's centroid)
+    let scored: Vec<(usize, f32)> = indexed_lines
+        .iter()
+        .zip(embeddings.iter())
+        .map(|((orig_idx, _), emb)| {
+            let anomaly = 1.0 - cosine_similarity(emb, historical_centroid);
+            (*orig_idx, anomaly)
+        })
+        .collect();
+
+    // Hard-keep critical lines
+    let mut selected: std::collections::HashSet<usize> = std::collections::HashSet::new();
+    for (orig_idx, line) in lines.iter().enumerate() {
+        if critical_pattern().is_match(line) {
+            selected.insert(orig_idx);
+        }
+    }
+
+    let max_score = scored.iter().map(|(_, s)| *s).fold(0.0f32, f32::max);
+    let relative_threshold = max_score * 0.40;
+    // Absolute floor: lines with anomaly below 0.10 are considered "normal for this command"
+    // and suppressed regardless of budget. This handles the case where ALL lines are
+    // near-identical to the historical centroid (max_score ≈ 0 → relative threshold ≈ 0).
+    let absolute_floor: f32 = 0.10;
+    let score_threshold = relative_threshold.max(absolute_floor);
+
+    let mut ranked = scored.clone();
+    ranked.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+
+    for (orig_idx, score) in &ranked {
+        if selected.len() >= budget { break; }
+        if *score < score_threshold { break; }
+        selected.insert(*orig_idx);
+    }
+
+    let mut kept: Vec<usize> = selected.into_iter().collect();
+    kept.sort();
+
+    let mut result: Vec<String> = Vec::new();
+    let mut prev_idx: Option<usize> = None;
+    for idx in &kept {
+        if let Some(prev) = prev_idx {
+            let gap = idx - prev - 1;
+            if gap > 0 {
+                result.push(format!("[... {} lines omitted ...]", gap));
+            }
+        } else if *idx > 0 {
+            result.push(format!("[... {} lines omitted ...]", idx));
+        }
+        result.push(lines[*idx].to_string());
+        prev_idx = Some(*idx);
+    }
+    if let Some(last) = prev_idx {
+        let trailing = total - last - 1;
+        if trailing > 0 {
+            result.push(format!("[... {} lines omitted ...]", trailing));
+        }
+    }
+
+    Ok(result.join("\n"))
+}
+
+// ── Zero-shot noise classification ───────────────────────────────────────────
+
+/// Prototype strings that anchor the "useful" and "noise" poles in embedding space.
+const USEFUL_PROTOTYPE: &str =
+    "error message stack trace type mismatch test failure file path function signature warning";
+const NOISE_PROTOTYPE: &str =
+    "compiling downloading resolving fetching progress elapsed already up to date artifact";
+
+static USEFUL_EMB: OnceCell<Vec<f32>> = OnceCell::new();
+static NOISE_EMB: OnceCell<Vec<f32>> = OnceCell::new();
+
+fn useful_embedding() -> anyhow::Result<&'static Vec<f32>> {
+    USEFUL_EMB.get_or_try_init(|| {
+        let model = get_model()?;
+        Ok(model.embed(vec![USEFUL_PROTOTYPE], None)?.remove(0))
+    })
+}
+
+fn noise_embedding() -> anyhow::Result<&'static Vec<f32>> {
+    NOISE_EMB.get_or_try_init(|| {
+        let model = get_model()?;
+        Ok(model.embed(vec![NOISE_PROTOTYPE], None)?.remove(0))
+    })
+}
+
+/// Scores each line as `useful_similarity - noise_similarity`.
+///
+/// Positive score  → line resembles useful developer output (errors, warnings, traces).
+/// Negative score  → line resembles boilerplate noise (progress, artifacts, downloads).
+///
+/// Returns one score per input line in the same order. Empty input returns empty vec.
+pub fn noise_scores(lines: &[&str]) -> anyhow::Result<Vec<f32>> {
+    if lines.is_empty() {
+        return Ok(vec![]);
+    }
+
+    let model = get_model()?;
+    let useful_emb = useful_embedding()?;
+    let noise_emb = noise_embedding()?;
+
+    let embeddings = model.embed(lines.to_vec(), None)?;
+
+    let scores = embeddings
+        .iter()
+        .map(|emb| cosine_similarity(emb, useful_emb) - cosine_similarity(emb, noise_emb))
+        .collect();
+
+    Ok(scores)
 }
 
 // ── Batch embedding (public) ──────────────────────────────────────────────────

@@ -44,11 +44,15 @@ Claude issues: some-unknown-tool
 
 - **31 handlers (40+ aliases)** — covers the full surface area of common dev tools
 - **BERT semantic routing** — unknown commands fuzzy-matched to nearest handler via sentence embeddings
-- **Query-biased BERT** — anomaly scoring blended with command-string relevance for smarter summarization
+- **Intent-aware query** — PostToolUse blends command string (30%) + last assistant message (70%) so output relevant to Claude's current task scores highest
+- **Semantic line clustering** — near-duplicate lines collapse to one representative + `[N similar]` instead of repeating them N times
+- **Entropy-adjusted budget** — uniform/repetitive output (npm install, progress bars) gets a tight budget automatically; diverse output gets the full budget
+- **Contextual anchoring** — error lines keep their nearest semantic neighbors (function signatures, file pointers) for immediate context
+- **Zero-shot noise classifier** — prototype embeddings score each line as useful vs boilerplate before anomaly ranking
+- **Semantic delta compression** — repeated commands (cargo build N times) emit only new/changed lines + `[X lines same as turn N]`
+- **Per-command historical centroid** — anomaly scored against what this command *usually* produces, so truly new output is surfaced aggressively
 - **Session output cache** — identical tool outputs across turns replaced with a single reference line
 - **Session-aware compression** — budget tightens as context fills; sentence-level cross-turn dedup via ccr-sdk
-- **Log anomaly scoring** — docker/kubectl/journalctl use centroid-distance BERT scoring instead of exact-match dedup
-- **Smart `cat`** — files >500 lines use BERT importance scoring, not head+tail
 - **Conversation compression** (ccr-sdk) — 10–20% savings per turn that compound across a long session
 
 ---
@@ -325,6 +329,18 @@ Any command without a handler goes through four stages:
 
 **BERT scoring:** Each line is scored as `1 - cosine_similarity(embedding, centroid)`. High score = outlier = informative. Lines matching error/warning patterns are hard-kept regardless of score. Falls back to head+tail if the model is unavailable.
 
+Five additional BERT passes run on top of the base pipeline:
+
+| Pass | Trigger | What it does |
+|------|---------|--------------|
+| Intent-aware query | PostToolUse | Blends command + last assistant message as query; task-relevant lines rank higher |
+| Semantic clustering | Any output | Groups near-identical lines (cosine > 0.85) → one rep + `[N similar]` |
+| Entropy budget | Long uniform output | Samples embeddings; tight budget when variance is low, full budget when diverse |
+| Contextual anchors | After anomaly selection | Keeps up to N semantic neighbors of each kept anomaly for context |
+| Noise classifier | Pre-ranking | Prototype embeddings score each line as useful vs boilerplate before anomaly sort |
+| Delta compression | Repeated commands | Compares against session history; suppresses shared lines, surfaces new ones |
+| Historical centroid | Per-command | Scores anomaly vs rolling mean of prior runs; genuinely new output stands out more |
+
 ---
 
 ## Session Intelligence
@@ -555,8 +571,10 @@ ccr/                     CLI binary
 ccr-core/                Core library (no I/O)
   src/pipeline.rs        ANSI strip → normalize → patterns → BERT summarize
                          (process() accepts optional query for B2 biasing)
-  src/summarizer.rs      fastembed AllMiniLML6V2, OnceCell model cache (A1),
-                         anomaly scoring, summarize_with_query() for B2
+  src/summarizer.rs      fastembed AllMiniLML6V2, OnceCell model cache;
+                         anomaly scoring, clustering, intent-aware query,
+                         entropy budget, contextual anchoring, noise classifier,
+                         delta compression, historical-centroid scoring
   src/analytics.rs       Analytics struct (command, subcommand, duration_ms)
   src/config.rs          CcrConfig, GlobalConfig, TeeConfig, FilterAction
   src/tokens.rs          tiktoken cl100k_base

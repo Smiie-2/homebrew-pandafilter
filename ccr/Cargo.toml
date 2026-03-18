@@ -7,6 +7,10 @@ edition = "2021"
 name = "ccr"
 path = "src/main.rs"
 
+[lib]
+name = "ccr"
+path = "src/lib.rs"
+
 [dependencies]
 ccr-core = { path = "../ccr-core" }
 ccr-sdk  = { path = "../ccr-sdk"  }
