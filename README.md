@@ -10,15 +10,15 @@ Numbers from `ccr/tests/handler_benchmarks.rs` — each handler fed a realistic 
 
 | Operation | Without CCR | With CCR | Savings |
 |-----------|------------:|---------:|:-------:|
-| `cargo build` (130 deps, 5 warnings) | 1,923 | 93 | **−95%** |
-| `cargo test` (200 tests, 2 failures) | 2,782 | 174 | **−94%** |
-| `ls` (project root) | 691 | 102 | **−85%** |
-| `git log` (25 commits) | 1,573 | 353 | **−78%** |
-| `git status` (10 staged, 40 modified, 8 untracked) | 650 | 184 | **−72%** |
-| `jest` (150 tests, 2 failures) | 330 | 114 | −65% |
+| `cargo build` | 1,923 | 93 | **−95%** |
+| `cargo test` | 2,782 | 174 | **−94%** |
+| `ls` | 691 | 102 | **−85%** |
+| `git log` | 1,573 | 353 | **−78%** |
+| `git status` | 650 | 184 | **−72%** |
+| `jest` | 330 | 114 | −65% |
 | `git push` | 173 | 106 | −39% |
-| `tsc` (20 errors, 5 files) | 666 | 509 | −24% |
-| `git diff` (3 files, ~60 lines changed) | 1,757 | 1,368 | −22% |
+| `tsc` | 666 | 509 | −24% |
+| `git diff` | 1,757 | 1,368 | −22% |
 | **Total** | **10,545** | **3,003** | **−72%** |
 
 **Notes:**
