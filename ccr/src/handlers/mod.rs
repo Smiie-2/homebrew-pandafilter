@@ -1,6 +1,7 @@
 pub mod aws;
 pub mod brew;
 pub mod cargo;
+pub mod clippy;
 pub mod curl;
 pub mod diff;
 pub mod docker;
@@ -10,6 +11,7 @@ pub mod find;
 pub mod gh;
 pub mod git;
 pub mod go;
+pub mod golangci_lint;
 pub mod grep;
 pub mod helm;
 pub mod jest;
@@ -19,8 +21,13 @@ pub mod kubectl;
 pub mod ls;
 pub mod make;
 pub mod maven;
+pub mod next;
 pub mod npm;
 pub mod pip;
+pub mod playwright;
+pub mod pnpm;
+pub mod prettier;
+pub mod prisma;
 pub mod psql;
 pub mod pytest;
 pub mod python;
@@ -61,7 +68,8 @@ fn get_handler_exact(cmd: &str) -> Option<Box<dyn Handler>> {
         "curl" => Some(Box::new(curl::CurlHandler)),
         "git" => Some(Box::new(git::GitHandler)),
         "docker" | "docker-compose" => Some(Box::new(docker::DockerHandler)),
-        "npm" | "pnpm" | "yarn" => Some(Box::new(npm::NpmHandler)),
+        "npm" | "yarn" => Some(Box::new(npm::NpmHandler)),
+        "pnpm" => Some(Box::new(pnpm::PnpmHandler)),
         "ls" => Some(Box::new(ls::LsHandler)),
         "cat" => Some(Box::new(read::ReadHandler)),
         "grep" | "rg" => Some(Box::new(grep::GrepHandler)),
@@ -94,6 +102,13 @@ fn get_handler_exact(cmd: &str) -> Option<Box<dyn Handler>> {
         "brew" => Some(Box::new(brew::BrewHandler)),
         "helm" => Some(Box::new(helm::HelmHandler)),
         "journalctl" => Some(Box::new(journalctl::JournalctlHandler)),
+        // Batch 6: New handlers
+        "clippy" | "cargo-clippy" => Some(Box::new(clippy::ClippyHandler)),
+        "next" | "next.js" => Some(Box::new(next::NextHandler)),
+        "playwright" => Some(Box::new(playwright::PlaywrightHandler)),
+        "prisma" => Some(Box::new(prisma::PrismaHandler)),
+        "golangci-lint" | "golangci_lint" => Some(Box::new(golangci_lint::GolangCiLintHandler)),
+        "prettier" => Some(Box::new(prettier::PrettierHandler)),
         _ => None,
     }
 }
@@ -121,11 +136,20 @@ const STATIC_ALIASES: &[(&str, &str)] = &[
     ("./gradlew",   "gradle"), ("gradlew",   "gradle"),
     ("./mvnw",      "mvn"),    ("mvnw",      "mvn"),
     ("ninja",       "make"),   ("bmake",     "make"),
+    // Next.js variants
+    ("next-router",     "next"),
+    // Playwright variants
+    ("npx playwright",  "playwright"),
+    // Prettier variants
+    ("prettier2",       "prettier"),
+    // Go linter variants
+    ("golangci",        "golangci-lint"),
     // Kubernetes wrappers
     ("k",           "kubectl"), ("kubectl.exe", "kubectl"),
     ("minikube",    "kubectl"), ("kind",        "kubectl"),
     // Helm variants
-    ("helm3",       "helm"),
+    ("helm3",             "helm"),
+    ("pnpx",              "pnpm"),
     // Terraform variants
     ("terraform1",  "terraform"),
     // Cloud CLIs
@@ -171,6 +195,13 @@ const HANDLER_REPS: &[(&str, &str)] = &[
     ("aws ec2 s3 lambda iam",           "aws"),
     ("make build clean install target", "make"),
     ("psql query select insert",        "psql"),
+    ("next build dev lint start",       "next"),
+    ("playwright test browser e2e",     "playwright"),
+    ("prisma generate migrate schema",  "prisma"),
+    ("golangci-lint run check issues",  "golangci-lint"),
+    ("prettier format check write",     "prettier"),
+    ("pnpm install add run exec",       "pnpm"),
+    ("clippy warning lint rust",        "clippy"),
 ];
 
 const BERT_ROUTE_THRESHOLD: f32 = 0.55;
