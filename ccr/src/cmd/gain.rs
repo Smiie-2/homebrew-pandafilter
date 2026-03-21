@@ -77,6 +77,11 @@ fn load_records() -> Result<Vec<Analytics>> {
 // ─── Summary view (default) ────────────────────────────────────────────────────
 
 fn print_summary(records: &[Analytics]) {
+    // Split legacy (timestamp=0) records from dated ones.
+    // Legacy records have no timestamp and cannot be placed in any date window.
+    let (legacy, dated): (Vec<&Analytics>, Vec<&Analytics>) =
+        records.iter().partition(|r| r.timestamp_secs == 0);
+
     let total_input: usize = records.iter().map(|r| r.input_tokens).sum();
     let total_output: usize = records.iter().map(|r| r.output_tokens).sum();
     let total_saved = total_input.saturating_sub(total_output);
@@ -88,12 +93,14 @@ fn print_summary(records: &[Analytics]) {
     let today_start = day_start(now_secs);
     let week_start = now_secs.saturating_sub(7 * 86400);
 
-    let today: Vec<&Analytics> = records
+    let today: Vec<&Analytics> = dated
         .iter()
+        .copied()
         .filter(|r| r.timestamp_secs >= today_start)
         .collect();
-    let week: Vec<&Analytics> = records
+    let week: Vec<&Analytics> = dated
         .iter()
+        .copied()
         .filter(|r| r.timestamp_secs >= week_start)
         .collect();
 
@@ -140,6 +147,19 @@ fn print_summary(records: &[Analytics]) {
         format!("~{}", fmt_cost(cost_saved)).if_supports_color(Stdout, |t| t.style(yellow_bold)),
         format!("(at {})", price_label).if_supports_color(Stdout, |t| t.dimmed()),
     );
+    if !legacy.is_empty() {
+        let legacy_saved: usize = legacy.iter().map(|r| r.tokens_saved()).sum();
+        println!(
+            "  {}",
+            format!(
+                "(includes {} legacy run{} without timestamps · {} tokens)",
+                legacy.len(),
+                if legacy.len() == 1 { "" } else { "s" },
+                fmt_tokens(legacy_saved)
+            )
+            .if_supports_color(Stdout, |t| t.dimmed()),
+        );
+    }
 
     if !today.is_empty() {
         let t_saved: usize = today.iter().map(|r| r.tokens_saved()).sum();
@@ -290,12 +310,15 @@ fn print_summary(records: &[Analytics]) {
 fn print_history(records: &[Analytics], days: u32) {
     let (price_per_token, _) = resolve_price();
     let now_secs = now_unix();
-    let cutoff = now_secs.saturating_sub(days as u64 * 86400);
+    // Align cutoff to UTC midnight of the earliest displayed day so the rolling
+    // window boundary doesn't split a calendar day and silently drop records.
+    let first_day_ts = now_secs.saturating_sub((days as u64 - 1) * 86400);
+    let cutoff = first_day_ts - (first_day_ts % 86400);
 
-    // Group by calendar day (local date string "YYYY-MM-DD")
+    // Group by calendar day (UTC date string "YYYY-MM-DD")
     let mut by_day: BTreeMap<String, DayStats> = BTreeMap::new();
 
-    for r in records.iter().filter(|r| r.timestamp_secs >= cutoff) {
+    for r in records.iter().filter(|r| r.timestamp_secs > 0 && r.timestamp_secs >= cutoff) {
         let day = unix_to_date(r.timestamp_secs);
         let entry = by_day.entry(day).or_default();
         entry.input += r.input_tokens;
@@ -383,9 +406,26 @@ fn print_history(records: &[Analytics], days: u32) {
         .if_supports_color(Stdout, |t| t.bold())
     );
 
+    // Legacy records (timestamp=0): show totals separately
+    let legacy_iter = records.iter().filter(|r| r.timestamp_secs == 0);
+    let (legacy_count, legacy_saved) = legacy_iter.fold((0usize, 0usize), |(c, s), r| {
+        (c + 1, s + r.tokens_saved())
+    });
+    if legacy_count > 0 {
+        let line = format!(
+            "{:<12}  {:>5}  {:>12}  {:>8}  {:>10}",
+            "(legacy)",
+            legacy_count,
+            fmt_tokens(legacy_saved),
+            "—",
+            "—",
+        );
+        println!("{}", line.if_supports_color(Stdout, |t| t.dimmed()));
+    }
+
     // Top commands over the period
     let mut cmd_stats: BTreeMap<String, CmdStats> = BTreeMap::new();
-    for r in records.iter().filter(|r| r.timestamp_secs >= cutoff) {
+    for r in records.iter().filter(|r| r.timestamp_secs > 0 && r.timestamp_secs >= cutoff) {
         let key = normalize_cmd_key(r.command.as_deref());
         let e = cmd_stats.entry(key).or_default();
         e.input += r.input_tokens;

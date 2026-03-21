@@ -65,10 +65,16 @@ impl NoiseStore {
             let _ = std::fs::create_dir_all(parent);
         }
         let Ok(json) = serde_json::to_string(self) else { return };
-        // Atomic write: write to .tmp then rename
-        let tmp = path.with_extension("tmp");
-        if std::fs::write(&tmp, json).is_ok() {
-            let _ = std::fs::rename(&tmp, &path);
+        // Atomic write: use a pid-unique temp file to avoid collisions when
+        // multiple ccr processes run concurrently, then rename into place.
+        let tmp = path.with_file_name(format!(
+            "noise.{}.tmp",
+            std::process::id()
+        ));
+        if std::fs::write(&tmp, &json).is_ok() {
+            if std::fs::rename(&tmp, &path).is_err() {
+                let _ = std::fs::remove_file(&tmp);
+            }
         }
     }
 }
@@ -109,11 +115,14 @@ impl NoiseStore {
     }
 
     /// Promote patterns that meet the count and suppression-rate thresholds.
+    /// Critical patterns (containing error/warning/panic/etc.) are never promoted
+    /// so they always pass through to the pipeline.
     pub fn promote_eligible(&mut self) {
         for entry in self.patterns.values_mut() {
             if !entry.promoted
                 && entry.count >= PROMOTE_MIN_COUNT
                 && suppression_rate(entry) >= PROMOTE_MIN_RATE
+                && !is_critical(&entry.pattern)
             {
                 entry.promoted = true;
             }

@@ -61,9 +61,7 @@ pub fn get_handler(cmd: &str) -> Option<Box<dyn Handler>> {
     // Level 0: user-defined TOML filters (.ccr/filters.toml or ~/.config/ccr/filters.toml)
     let user_filters = crate::user_filters::load_user_filters();
     if let Some(filter_def) = user_filters.commands.get(cmd) {
-        return Some(Box::new(crate::user_filters::UserFilterHandler {
-            filter_def: filter_def.clone(),
-        }));
+        return Some(Box::new(crate::user_filters::UserFilterHandler::new(filter_def.clone())));
     }
 
     get_handler_exact(cmd)

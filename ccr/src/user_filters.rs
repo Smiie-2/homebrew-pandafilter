@@ -1,6 +1,14 @@
+use regex::Regex;
 use serde::Deserialize;
 use std::collections::HashMap;
 use crate::handlers::Handler;
+
+/// Compile a user-supplied pattern as a regex.
+/// Falls back to a literal (escaped) match if the pattern is not valid regex.
+fn compile_pattern(pattern: &str) -> Regex {
+    Regex::new(pattern)
+        .unwrap_or_else(|_| Regex::new(&regex::escape(pattern)).expect("escaped pattern must be valid"))
+}
 
 #[derive(Debug, Clone, Deserialize, Default)]
 pub struct UserFiltersFile {
@@ -61,6 +69,41 @@ pub fn load_user_filters() -> UserFiltersFile {
 
 pub struct UserFilterHandler {
     pub filter_def: UserCommandFilter,
+    strip_regexes: Vec<Regex>,
+    keep_regexes: Vec<Regex>,
+    match_output_regex: Option<Regex>,
+    unless_regex: Option<Regex>,
+}
+
+impl UserFilterHandler {
+    pub fn new(filter_def: UserCommandFilter) -> Self {
+        let strip_regexes = filter_def
+            .strip_lines_matching
+            .iter()
+            .map(|p| compile_pattern(p))
+            .collect();
+        let keep_regexes = filter_def
+            .keep_lines_matching
+            .iter()
+            .map(|p| compile_pattern(p))
+            .collect();
+        let match_output_regex = filter_def
+            .match_output
+            .as_ref()
+            .map(|mo| compile_pattern(&mo.pattern));
+        let unless_regex = filter_def
+            .match_output
+            .as_ref()
+            .and_then(|mo| mo.unless_pattern.as_ref())
+            .map(|p| compile_pattern(p));
+        Self {
+            filter_def,
+            strip_regexes,
+            keep_regexes,
+            match_output_regex,
+            unless_regex,
+        }
+    }
 }
 
 impl Handler for UserFilterHandler {
@@ -69,34 +112,28 @@ impl Handler for UserFilterHandler {
 
         // 1. Check match_output short-circuit
         if let Some(mo) = &def.match_output {
-            let pattern_matches = output.contains(&mo.pattern);
-            let unless_blocks = mo
-                .unless_pattern
-                .as_ref()
-                .map(|p| output.contains(p.as_str()))
-                .unwrap_or(false);
-            if pattern_matches && !unless_blocks {
-                return mo.message.clone();
+            if let Some(re) = &self.match_output_regex {
+                let pattern_matches = re.is_match(output);
+                let unless_blocks = self
+                    .unless_regex
+                    .as_ref()
+                    .map(|r| r.is_match(output))
+                    .unwrap_or(false);
+                if pattern_matches && !unless_blocks {
+                    return mo.message.clone();
+                }
             }
         }
 
         // 2. Apply strip_lines_matching
         let mut lines: Vec<&str> = output.lines().collect();
-        if !def.strip_lines_matching.is_empty() {
-            lines.retain(|line| {
-                !def.strip_lines_matching
-                    .iter()
-                    .any(|pat| line.contains(pat.as_str()))
-            });
+        if !self.strip_regexes.is_empty() {
+            lines.retain(|line| !self.strip_regexes.iter().any(|re| re.is_match(line)));
         }
 
         // 3. Apply keep_lines_matching
-        if !def.keep_lines_matching.is_empty() {
-            lines.retain(|line| {
-                def.keep_lines_matching
-                    .iter()
-                    .any(|pat| line.contains(pat.as_str()))
-            });
+        if !self.keep_regexes.is_empty() {
+            lines.retain(|line| self.keep_regexes.iter().any(|re| re.is_match(line)));
         }
 
         // 4. Apply max_lines cap
@@ -119,7 +156,7 @@ mod tests {
     use super::*;
 
     fn make_handler(def: UserCommandFilter) -> UserFilterHandler {
-        UserFilterHandler { filter_def: def }
+        UserFilterHandler::new(def)
     }
 
     #[test]

@@ -97,8 +97,9 @@ pub fn extract_intent() -> Option<String> {
     Some(clean_intent(&text))
 }
 
-/// Strip markdown, return up to 256 chars. Truncates at a sentence boundary only
-/// if the text is longer than 256 chars — short responses are kept whole.
+/// Strip markdown and return the first sentence up to 256 chars.
+/// Truncates at the first sentence boundary (`.`, `?`, `!`).
+/// If no boundary exists within 256 chars, returns up to 256 chars as-is.
 fn clean_intent(text: &str) -> String {
     let stripped: String = text
         .chars()
@@ -106,13 +107,10 @@ fn clean_intent(text: &str) -> String {
         .collect();
     let stripped = stripped.trim();
 
-    if stripped.len() <= 256 {
-        return stripped.to_string();
-    }
-
-    // Long text: truncate at sentence boundary nearest to char 256
-    let chunk = &stripped[..256];
-    if let Some(pos) = chunk.rfind(|c| matches!(c, '.' | '?' | '!')) {
+    let limit = stripped.len().min(256);
+    let chunk = &stripped[..limit];
+    // Find the first sentence boundary and truncate there.
+    if let Some(pos) = chunk.find(|c| matches!(c, '.' | '?' | '!')) {
         chunk[..=pos].trim().to_string()
     } else {
         chunk.trim().to_string()

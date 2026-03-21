@@ -58,9 +58,10 @@ pub struct SessionHit {
 /// within one Claude Code process share the same session file.
 pub fn session_id() -> String {
     std::env::var("CCR_SESSION_ID").unwrap_or_else(|_| {
-        // Fallback: group by 1-hour window (stable within a terminal work session)
+        // Fallback: group by calendar day (UTC) so a long session spanning an
+        // hour boundary doesn't get split into two separate state files.
         let secs = now_secs();
-        format!("ts_{}", secs / 3600)
+        format!("ts_{}", secs / 86400)
     })
 }
 
