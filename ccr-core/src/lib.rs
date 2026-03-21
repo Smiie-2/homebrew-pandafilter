@@ -1,5 +1,6 @@
 pub mod analytics;
 pub mod ansi;
+pub mod global_rules;
 pub mod config;
 pub mod patterns;
 pub mod pipeline;

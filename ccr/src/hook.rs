@@ -91,6 +91,13 @@ fn process_bash(hook_input: HookInput) -> Result<()> {
         return Ok(());
     }
 
+    // Skip the entire pipeline (including BERT) for trivially small outputs.
+    // Commands like `which`, `mkdir`, `wc` produce <15 tokens — nothing to compress.
+    const MIN_PIPELINE_TOKENS: usize = 15;
+    if ccr_core::tokens::count_tokens(&output_text) < MIN_PIPELINE_TOKENS {
+        return Ok(());
+    }
+
     let config = match crate::config_loader::load_config() {
         Ok(c) => c,
         Err(_) => return Ok(()),

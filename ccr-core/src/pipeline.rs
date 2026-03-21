@@ -1,6 +1,7 @@
 use crate::analytics::Analytics;
 use crate::ansi::strip_ansi;
 use crate::config::CcrConfig;
+use crate::global_rules;
 use crate::patterns::PatternFilter;
 use crate::summarizer::{
     entropy_adjusted_budget, noise_scores, summarize_against_centroid, summarize_with_anchoring,
@@ -59,6 +60,9 @@ impl Pipeline {
         if self.config.global.normalize_whitespace {
             text = normalize(&text, &self.config.global);
         }
+
+        // 2.5. Apply global pre-filter rules (pure regex, zero BERT cost, always runs)
+        text = global_rules::apply(&text);
 
         // 3. Apply command-specific patterns
         if let Some(hint) = command_hint {
