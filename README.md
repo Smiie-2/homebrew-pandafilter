@@ -115,21 +115,7 @@ brew install ccr
 ccr init
 ```
 
-### One-liner (macOS + Linux)
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/AssafWoo/homebrew-ccr/main/install.sh | bash
-```
-
-Downloads the pre-built binary, installs to `~/.local/bin/ccr`, and runs `ccr init`.
-
-Make sure `~/.local/bin` is on your PATH:
-
-```bash
-export PATH="$HOME/.local/bin:$PATH"   # add to ~/.zshrc or ~/.bashrc
-```
-
-### From source
+### From source (Linux)
 
 ```bash
 git clone https://github.com/AssafWoo/homebrew-ccr.git && cd homebrew-ccr
