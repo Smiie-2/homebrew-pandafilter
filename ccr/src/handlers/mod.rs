@@ -1,4 +1,5 @@
 pub mod aws;
+pub mod biome;
 pub mod brew;
 pub mod cargo;
 pub mod clippy;
@@ -30,6 +31,10 @@ pub mod playwright;
 pub mod pnpm;
 pub mod prettier;
 pub mod prisma;
+pub mod stylelint;
+pub mod turbo;
+pub mod vite;
+pub mod webpack;
 pub mod psql;
 pub mod pytest;
 pub mod python;
@@ -119,6 +124,13 @@ fn get_handler_exact(cmd: &str) -> Option<Box<dyn Handler>> {
         "prisma" => Some(Box::new(prisma::PrismaHandler)),
         "golangci-lint" | "golangci_lint" => Some(Box::new(golangci_lint::GolangCiLintHandler)),
         "prettier" => Some(Box::new(prettier::PrettierHandler)),
+        // Frontend build tools
+        "vite" => Some(Box::new(vite::ViteHandler)),
+        "webpack" | "webpack-cli" => Some(Box::new(webpack::WebpackHandler)),
+        "turbo" => Some(Box::new(turbo::TurboHandler)),
+        // CSS / universal linters
+        "stylelint" => Some(Box::new(stylelint::StylelintHandler)),
+        "biome" => Some(Box::new(biome::BiomeHandler)),
         _ => None,
     }
 }
@@ -152,6 +164,14 @@ const STATIC_ALIASES: &[(&str, &str)] = &[
     ("npx playwright",  "playwright"),
     // Prettier variants
     ("prettier2",       "prettier"),
+    // Vite variants
+    ("vitest",          "vitest"),  // kept separate; vite dev/build → vite
+    // Turbo variants
+    ("npx turbo",       "turbo"),   ("./node_modules/.bin/turbo", "turbo"),
+    // Webpack variants
+    ("npx webpack",     "webpack"), ("./node_modules/.bin/webpack", "webpack"),
+    // Biome variants
+    ("@biomejs/biome",  "biome"),
     // Go linter variants
     ("golangci",        "golangci-lint"),
     // Kubernetes wrappers

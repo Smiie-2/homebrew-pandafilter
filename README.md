@@ -24,7 +24,9 @@ Numbers from `ccr/tests/handler_benchmarks.rs` — each handler fed a realistic 
 | `make` | 545 | 72 | **−87%** |
 | `git push` | 173 | 24 | **−86%** |
 | `ls` | 691 | 102 | **−85%** |
+| `webpack` | 882 | 143 | **−84%** |
 | `vitest` | 625 | 103 | **−84%** |
+| `turbo run build` | 597 | 115 | **−81%** |
 | `eslint` | 4,393 | 974 | −78% |
 | `git log` | 1,573 | 353 | −78% |
 | `grep` | 2,925 | 691 | −76% |
@@ -33,14 +35,17 @@ Numbers from `ccr/tests/handler_benchmarks.rs` — each handler fed a realistic 
 | `golangci-lint` | 3,678 | 960 | −74% |
 | `git status` | 650 | 184 | −72% |
 | `kubectl get pods` | 2,306 | 689 | −70% |
+| `vite build` | 526 | 182 | −65% |
 | `jest` | 330 | 114 | −65% |
 | `env` | 1,155 | 399 | −65% |
 | `mvn install` | 4,585 | 1,613 | −65% |
 | `brew install` | 368 | 148 | −60% |
 | `gh pr list` | 774 | 321 | −59% |
 | `git diff` | 6,370 | 2,654 | −58% |
+| `biome lint` | 1,503 | 753 | −50% |
 | `tsc` | 2,598 | 1,320 | −49% |
-| **Total** | **57,916** | **11,997** | **−79%** |
+| `stylelint` | 1,100 | 845 | −23% |
+| **Total** | **62,524** | **14,035** | **−78%** |
 
 **Notes:**
 - For `cargo build` / `cargo test`: "without CCR" is standard human-readable output; CCR injects `--message-format json` to extract structured errors.
@@ -237,12 +242,17 @@ ccr proxy git status  # run raw (no filtering), record analytics baseline
 | Handler | Keys | Savings | Key behavior |
 |---------|------|---------|-------------|
 | **tsc** | `tsc` | ~50% | Groups errors by file; deduplicates repeated TS codes; truncates verbose type messages. `Build OK` on clean. |
-| **vitest** | `vitest` | ~88% | FAIL blocks + summary; drops `✓` lines. |
-| **jest** | `jest`, `bun`, `deno`, `nx` | ~88% | `●` failure blocks + summary; drops `PASS` lines. |
-| **eslint** | `eslint` | ~85% | Errors grouped by file, caps at 20 + `[+N more]`. |
+| **vitest** | `vitest` | ~84% | FAIL blocks + summary; drops `✓` lines. |
+| **jest** | `jest`, `bun`, `deno`, `nx` | ~65% | `●` failure blocks + summary; drops `PASS` lines. |
+| **eslint** | `eslint` | ~78% | Errors grouped by file, caps at 20 + `[+N more]`. |
 | **next** | `next` | ~90% | `build`: route table collapsed, errors + page count. `dev`: errors + ready line. |
-| **playwright** | `playwright` | ~88% | Failing test names + error messages; passing tests dropped. |
+| **playwright** | `playwright` | ~99% | Failing test names + error messages; passing tests dropped. |
 | **prettier** | `prettier` | ~80% | `--check`: files needing formatting + count. `--write`: file count. |
+| **vite** | `vite` | ~65% | `build`: asset chunk table collapsed, module noise dropped. `dev`: HMR deduplication. |
+| **webpack** | `webpack`, `webpack-cli` | ~84% | Module resolution graph dropped; keeps assets, errors, warnings, and build result. |
+| **turbo** | `turbo`, `npx turbo` | ~81% | Inner task output stripped; keeps cache hit/miss per package + final summary. |
+| **stylelint** | `stylelint` | ~23% | Issues grouped by file, caps at 40 + `[+N more]`, summary count kept. |
+| **biome** | `biome`, `@biomejs/biome` | ~50% | Code context snippets (│/^^^) stripped; keeps file:line, rule name, and message. |
 
 **Python**
 

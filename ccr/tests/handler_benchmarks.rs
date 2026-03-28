@@ -12,6 +12,7 @@
 //! the true end-to-end savings a user gets after `ccr init`.
 
 use ccr::handlers::{
+    biome::BiomeHandler,
     brew::BrewHandler,
     cargo::CargoHandler,
     clippy::ClippyHandler,
@@ -34,9 +35,13 @@ use ccr::handlers::{
     pip::PipHandler,
     playwright::PlaywrightHandler,
     pytest::PytestHandler,
+    stylelint::StylelintHandler,
     terraform::TerraformHandler,
     tsc::TscHandler,
+    turbo::TurboHandler,
     vitest::VitestHandler,
+    vite::ViteHandler,
+    webpack::WebpackHandler,
     Handler,
 };
 use ccr_core::tokens::count_tokens;
@@ -1629,6 +1634,215 @@ fn gradle_build_output() -> String {
     out
 }
 
+// ─── frontend build tools fixtures ───────────────────────────────────────────
+
+fn vite_build_output() -> String {
+    let mut out = String::new();
+    out.push_str("vite v5.2.0 building for production...\n");
+    out.push_str("transforming...\n");
+    // simulate transform log lines — lots of per-file noise
+    let modules = [
+        "src/main.tsx", "src/App.tsx", "src/components/Button.tsx",
+        "src/components/Modal.tsx", "src/components/Sidebar.tsx",
+        "src/components/Header.tsx", "src/components/Footer.tsx",
+        "src/components/Card.tsx", "src/components/Table.tsx",
+        "src/components/Form.tsx", "src/components/Input.tsx",
+        "src/components/Select.tsx", "src/components/Checkbox.tsx",
+        "src/components/Radio.tsx", "src/components/Tooltip.tsx",
+        "src/components/Dropdown.tsx", "src/components/Avatar.tsx",
+        "src/components/Badge.tsx", "src/components/Alert.tsx",
+        "src/components/Spinner.tsx", "src/pages/Home.tsx",
+        "src/pages/Dashboard.tsx", "src/pages/Profile.tsx",
+        "src/pages/Settings.tsx", "src/pages/Login.tsx",
+        "src/pages/Register.tsx", "src/pages/NotFound.tsx",
+        "src/hooks/useAuth.ts", "src/hooks/useTheme.ts",
+        "src/hooks/useLocalStorage.ts", "src/hooks/useDebounce.ts",
+        "src/hooks/useFetch.ts", "src/hooks/useForm.ts",
+        "src/stores/auth.ts", "src/stores/ui.ts",
+        "src/stores/data.ts", "src/utils/api.ts",
+        "src/utils/format.ts", "src/utils/validators.ts",
+        "src/utils/constants.ts",
+    ];
+    for m in &modules {
+        out.push_str(&format!("✓ {}\n", m));
+    }
+    out.push_str(&format!("✓ {} modules transformed.\n", modules.len()));
+    out.push_str("rendering chunks...\n");
+    // chunk output
+    let chunks = [
+        ("dist/assets/index-DiwrgTda.js",    "142.30 kB │ gzip:  45.80 kB"),
+        ("dist/assets/vendor-BKbdCLth.js",   "312.45 kB │ gzip:  98.12 kB"),
+        ("dist/assets/router-C9dFYmek.js",    "24.80 kB │ gzip:   8.33 kB"),
+        ("dist/assets/charts-BpHoEHuC.js",  "198.60 kB │ gzip:  60.44 kB"),
+        ("dist/assets/icons-D3mNoPLJ.js",    "52.10 kB │ gzip:  14.22 kB"),
+        ("dist/assets/index-CKttPMtA.css",   "28.40 kB │ gzip:   6.11 kB"),
+    ];
+    for (name, size) in &chunks {
+        out.push_str(&format!("dist/{} │ {}\n", name, size));
+    }
+    out.push_str("\n✓ built in 4.32s\n");
+    out
+}
+
+fn webpack_build_output() -> String {
+    let mut out = String::new();
+    out.push_str("asset main.js 1.44 MiB [emitted] (name: main)\n");
+    out.push_str("asset vendors.react.js 312 KiB [emitted] (name: vendors-react)\n");
+    out.push_str("asset vendors.utils.js 98 KiB [emitted] (name: vendors-utils)\n");
+    out.push_str("asset styles.css 32.4 KiB [emitted] (name: styles)\n");
+    out.push_str("asset index.html 1.23 KiB [emitted]\n");
+    // Module resolution noise — what webpack spits out verbosely
+    out.push_str("cacheable modules 3.21 MiB\n");
+    out.push_str("  modules by path ./node_modules/ 2.98 MiB\n");
+    let node_modules = [
+        "react/index.js", "react-dom/index.js", "react-router-dom/index.js",
+        "axios/index.js", "lodash/lodash.js", "moment/moment.js",
+        "date-fns/index.js", "classnames/index.js", "immer/dist/immer.cjs.js",
+        "zustand/dist/zustand.cjs.js", "react-query/lib/index.js",
+        "react-hook-form/dist/index.cjs.js", "zod/lib/index.js",
+        "react-table/dist/react-table.development.js",
+        "@mui/material/index.js", "@mui/icons-material/index.js",
+        "framer-motion/dist/framer-motion.cjs.js",
+        "react-select/dist/react-select.cjs.js",
+        "recharts/lib/index.js", "react-virtualized/dist/commonjs/index.js",
+    ];
+    for m in &node_modules {
+        out.push_str(&format!("    ./node_modules/{} 65.7 KiB [built] [code generated]\n", m));
+    }
+    out.push_str("  modules by path ./src/ 234 KiB\n");
+    let src_modules = [
+        "src/index.tsx", "src/App.tsx", "src/router.tsx",
+        "src/store/index.ts", "src/api/client.ts", "src/api/auth.ts",
+        "src/api/users.ts", "src/api/products.ts",
+        "src/components/Button/index.tsx", "src/components/Modal/index.tsx",
+        "src/pages/Dashboard/index.tsx", "src/pages/Profile/index.tsx",
+    ];
+    for m in &src_modules {
+        out.push_str(&format!("    ./{} 12.3 KiB [built] [code generated]\n", m));
+    }
+    out.push_str("WARNING in ./src/utils/legacy.js\n");
+    out.push_str("  DeprecationWarning: Buffer() is deprecated\n\n");
+    out.push_str("WARNING in ./node_modules/some-lib/index.js\n");
+    out.push_str("  Critical dependency: the request of a CommonJS module\n\n");
+    out.push_str("webpack 5.91.0 compiled with 2 warnings in 18432 ms\n");
+    out
+}
+
+fn turbo_run_output() -> String {
+    let mut out = String::new();
+    out.push_str("• Packages in scope: web, docs, @repo/ui, @repo/utils, @repo/config\n");
+    out.push_str("• Running build in 5 packages\n");
+    out.push_str("• Remote caching enabled\n\n");
+
+    let tasks = [
+        ("@repo/config:build",  "cache hit,  replaying output 1a2b3c4d"),
+        ("@repo/utils:build",   "cache hit,  replaying output 5e6f7a8b"),
+        ("@repo/ui:build",      "cache miss, executing 9c0d1e2f"),
+        ("docs:build",          "cache miss, executing 3a4b5c6d"),
+        ("web:build",           "cache miss, executing 7e8f9a0b"),
+    ];
+
+    for (task, status) in &tasks {
+        out.push_str(&format!("{}: {}\n", task, status));
+        // Inner build output that should be stripped
+        out.push_str(&format!("{}: > {} build\n", task, task.split(':').next().unwrap_or("")));
+        if task.contains("ui") {
+            out.push_str(&format!("{}: > tsc --noEmit\n", task));
+            out.push_str(&format!("{}: ✓ TypeScript compilation complete\n", task));
+            out.push_str(&format!("{}: > rollup -c\n", task));
+            out.push_str(&format!("{}: created dist/index.js in 2.3s\n", task));
+            out.push_str(&format!("{}: created dist/index.esm.js in 2.4s\n", task));
+        } else if task.contains("docs") {
+            out.push_str(&format!("{}: > next build\n", task));
+            out.push_str(&format!("{}: ✓ Generating static pages (24/24)\n", task));
+            out.push_str(&format!("{}: Route (pages)  Size  First Load JS\n", task));
+        } else if task.contains("web") {
+            out.push_str(&format!("{}: > next build\n", task));
+            for p in &["/", "/about", "/blog", "/contact", "/pricing"] {
+                out.push_str(&format!("{}: ○ {}\n", task, p));
+            }
+        }
+        out.push_str(&format!("{}:\n", task));
+    }
+
+    out.push_str("\n Tasks:    5 successful, 5 total\n");
+    out.push_str("  Cached:    2 cached, 5 total\n");
+    out.push_str("    Time:    42.117s >>> FULL TURBO\n");
+    out
+}
+
+fn stylelint_output() -> String {
+    let mut out = String::new();
+    let files = [
+        "src/components/Button/Button.css",
+        "src/components/Modal/Modal.scss",
+        "src/components/Sidebar/Sidebar.css",
+        "src/pages/Dashboard/Dashboard.scss",
+        "src/pages/Profile/Profile.css",
+        "src/styles/global.scss",
+        "src/styles/variables.scss",
+        "src/styles/typography.css",
+    ];
+    let rules = [
+        ("✖", "error",   "Unexpected unknown property \"colour\"",          "property-no-unknown"),
+        ("⚠", "warning", "Expected a leading zero",                         "number-leading-zero"),
+        ("✖", "error",   "Unexpected empty block",                          "block-no-empty"),
+        ("⚠", "warning", "Expected single-line comment to be \"//\"",       "comment-no-double-slash"),
+        ("✖", "error",   "Unexpected invalid hex color \"#gggggg\"",        "color-no-invalid-hex"),
+        ("⚠", "warning", "Expected no more than 2 empty lines",             "max-empty-lines"),
+        ("✖", "error",   "Unexpected longhand property \"border-top-width\"","shorthand-property-no-redundant-values"),
+    ];
+    let mut total = 0usize;
+    for (fi, file) in files.iter().enumerate() {
+        out.push_str(&format!("{}\n", file));
+        for j in 0..5usize {
+            let (sym, level, msg, rule) = rules[(fi * 5 + j) % rules.len()];
+            let line = (j + 1) * 3;
+            out.push_str(&format!("  {}:{:2}  {}  {}  {}\n", line, j + 1, sym, level, msg));
+            out.push_str(&format!("         {}  {}\n", " ".repeat(msg.len()), rule));
+            total += 1;
+        }
+        out.push_str("\n");
+    }
+    out.push_str(&format!("{} problems ({} errors, {} warnings)\n",
+        total, total * 3 / 5, total * 2 / 5));
+    out
+}
+
+fn biome_output() -> String {
+    let files = [
+        ("src/App.tsx",                   15,  5,  "lint/correctness/noUnusedVariables",  "This variable is unused."),
+        ("src/components/Button.tsx",     23,  3,  "lint/a11y/useButtonType",              "Provide an explicit type prop for the button element."),
+        ("src/components/Modal.tsx",      41,  7,  "lint/correctness/useExhaustiveDeps",  "This hook has missing dependencies."),
+        ("src/pages/Dashboard.tsx",       88, 12,  "lint/style/noNegationElse",            "Invert the condition to avoid negation."),
+        ("src/pages/Login.tsx",           34,  4,  "lint/suspicious/noDoubleEquals",       "Use === instead of ==."),
+        ("src/hooks/useAuth.ts",          56,  9,  "lint/correctness/noUnusedVariables",  "This variable is unused."),
+        ("src/utils/api.ts",              12,  1,  "lint/security/noGlobalEval",           "eval() is a security risk."),
+        ("src/store/authSlice.ts",        67, 14,  "lint/style/useConst",                  "This variable is never reassigned. Use const instead."),
+        ("src/components/Table.tsx",      29,  2,  "lint/a11y/useKeyWithClickEvents",      "Pair this with an onKeyDown handler."),
+        ("src/components/Form.tsx",      102,  8,  "lint/correctness/noUnusedVariables",  "This variable is unused."),
+    ];
+
+    let mut out = String::new();
+    for (file, line, col, rule, msg) in &files {
+        // Header line with separator
+        out.push_str(&format!("./{file}:{line}:{col} {rule} ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"));
+        out.push_str(&format!("  ✖ {}\n\n", msg));
+        // Code context (3 lines: before, offending, underline)
+        out.push_str(&format!("  {:>3} │ const placeholder_{} = \"value\";\n", line - 1, line));
+        out.push_str(&format!("  {:>3} │ const example_{} = \"code here\";\n", line, line));
+        out.push_str(&format!("      │   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n"));
+        out.push_str(&format!("  {:>3} │ // next line\n\n", line + 1));
+        out.push_str("  ℹ Unsafe fix: apply suggested change.\n\n");
+        out.push_str(&format!("  {:>3} │ const example_{} = \"code here\";\n", line, line));
+        out.push_str(&format!("      │ - const example_{} = \"code here\";\n", line));
+        out.push_str(&format!("      │ + const _example_{} = \"code here\";\n\n", line));
+    }
+    out.push_str(&format!("Checked {} files in 342ms.\n", files.len() + 5));
+    out.push_str(&format!("Found {} diagnostics.\n", files.len()));
+    out
+}
+
 // ─── benchmark runner ────────────────────────────────────────────────────────
 
 #[test]
@@ -1659,6 +1873,11 @@ fn benchmark_handlers() {
     let next       = NextHandler;
     let playwright = PlaywrightHandler;
     let pip        = PipHandler;
+    let vite       = ViteHandler;
+    let webpack    = WebpackHandler;
+    let turbo      = TurboHandler;
+    let stylelint  = StylelintHandler;
+    let biome      = BiomeHandler;
 
     let (cargo_baseline, cargo_json) = cargo_build();
     let cargo_test_raw               = cargo_test();
@@ -1691,6 +1910,11 @@ fn benchmark_handlers() {
     let env_raw        = env_large();
     let helm_raw       = helm_install_output();
     let gradle_raw     = gradle_build_output();
+    let vite_raw       = vite_build_output();
+    let webpack_raw    = webpack_build_output();
+    let turbo_raw      = turbo_run_output();
+    let stylelint_raw  = stylelint_output();
+    let biome_raw      = biome_output();
 
     struct Row { op: &'static str, in_tok: usize, out_tok: usize, min_pct: f64 }
 
@@ -1749,6 +1973,12 @@ fn benchmark_handlers() {
         row!("playwright test", playwright, playwright_raw, &["playwright","test"], 30.0),
         // ── Environment ──────────────────────────────────────────────────────
         row!("env", env, env_raw, &["env"], 45.0),
+        // ── Frontend build tools ─────────────────────────────────────────────
+        row!("vite build", vite, vite_raw, &["vite","build"], 50.0),
+        row!("webpack", webpack, webpack_raw, &["webpack"], 70.0),
+        row!("turbo run build", turbo, turbo_raw, &["turbo","run","build"], 50.0),
+        row!("stylelint", stylelint, stylelint_raw, &["stylelint"], 20.0),
+        row!("biome lint", biome, biome_raw, &["biome","lint"], 45.0),
     ];
 
     println!();
