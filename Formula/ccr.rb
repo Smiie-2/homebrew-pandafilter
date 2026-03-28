@@ -1,8 +1,8 @@
 class Ccr < Formula
   desc "LLM token optimizer for Claude Code — 60-90% token savings on dev operations"
   homepage "https://github.com/AssafWoo/homebrew-ccr"
-  url "https://github.com/AssafWoo/homebrew-ccr/archive/refs/tags/v0.5.15.tar.gz"
-  sha256 "PLACEHOLDER_RELEASE_SHA256" # updated automatically by release CI
+  url "https://github.com/AssafWoo/homebrew-ccr/archive/refs/tags/v0.5.16.tar.gz"
+  sha256 "9b67a773e5088384fdf8fb4d72e290416f4d656be0842917b7251f4fdb7f83d4" # updated automatically by release CI
   license "MIT"
   head "https://github.com/AssafWoo/homebrew-ccr.git", branch: "main"
 
@@ -18,14 +18,14 @@ class Ccr < Formula
   on_arm do
     resource "ort-runtime" do
       url "https://github.com/microsoft/onnxruntime/releases/download/v1.20.1/onnxruntime-osx-arm64-1.20.1.tgz"
-      sha256 "PLACEHOLDER_ORT_ARM64_SHA256"
+      sha256 "b678fc3c2354c771fea4fba420edeccfba205140088334df801e7fc40e83a57a"
     end
   end
 
   on_intel do
     resource "ort-runtime" do
       url "https://github.com/microsoft/onnxruntime/releases/download/v1.20.1/onnxruntime-osx-x86_64-1.20.1.tgz"
-      sha256 "PLACEHOLDER_ORT_X86_64_SHA256"
+      sha256 "0f73006813af2a1a5d1723ed7dfb694fc629d15037124081bb61b7bf7d99fc78"
     end
   end
 
