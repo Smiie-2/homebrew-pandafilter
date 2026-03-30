@@ -70,7 +70,6 @@ Numbers from `ccr/tests/handler_benchmarks.rs` — each handler fed a realistic 
 - [User-Defined Filters](#user-defined-filters)
 - [Session Intelligence](#session-intelligence)
 - [Hook Architecture](#hook-architecture)
-- [CCR vs RTK](#ccr-vs-rtk)
 - [Crate Overview](#crate-overview)
 
 ---
@@ -111,16 +110,25 @@ The hook **never reads your prompts or full conversation history.** It sees comm
 
 ## FAQ
 
+**Does CCR read my prompts or conversation history?**
+No. The hook only sees the output of shell commands (stdout/stderr) — the same bytes you'd read in your terminal. It never touches your prompts, Claude's replies, or conversation history.
+
+**Does CCR send any data outside my machine?**
+Never. All processing is fully local. BERT runs on-device using a small embedded model. Nothing is sent to any server.
+
+**BERT uses my "last message" — what exactly does that mean?**
+When compressing large output, CCR reads your single most-recent message from the local session file Claude Code maintains on disk. It's used as a relevance query so the compression keeps lines related to what you're working on. It's read-only, used only in that moment, and never stored or logged anywhere.
+
 **Does CCR degrade Claude's output quality?**
-No. CCR only removes noise from tool output — build logs, module resolution graphs, passing test lines, progress bars. The signal Claude needs (errors, file paths, summaries) is always kept. Claude sees a cleaner, more focused view of what happened, which if anything improves responses. Several users have run it for extended sessions without noticing any degradation.
+No. CCR only removes noise from tool output — build logs, module graphs, passing test lines, progress bars. The signal Claude needs (errors, file paths, summaries) is always kept. Claude sees a cleaner view of what happened, which if anything improves focus. Several users have run extended sessions without noticing any degradation.
 
 **What happens with a tool CCR doesn't know about?**
-It goes through BERT semantic routing — the command name is embedded and compared against all known handlers. If similarity is high enough, the closest handler is applied (filter-only at medium confidence, full rewrite at high confidence). If nothing matches, the output passes through unchanged. CCR never silently drops output.
+It goes through BERT semantic routing — the command name is compared against all known handlers by similarity. If confidence is high enough the closest handler is applied; if nothing matches the output passes through unchanged. CCR never silently drops output.
 
-**How do I know it's actually working?**
-Run `ccr gain` after a session. It shows per-command token counts and total savings. You can also run any command directly through CCR to see the filtered output:
+**How do I verify it's working?**
+Run `ccr gain` after a session to see per-command token counts and total savings. To inspect what Claude actually receives from a specific command:
 ```bash
-ccr proxy git log --oneline -20   # see exactly what Claude would receive
+ccr proxy git log --oneline -20
 ```
 
 **What makes CCR different from rule-based proxies:**
@@ -492,30 +500,6 @@ Dispatches by `tool_name` — Bash, Read, Glob, or Grep:
 - **Grep** — results ≤ 10 lines pass through; larger result sets routed through GrepHandler (compact paths, per-file 25-match cap)
 
 Never fails — returns nothing on error so Claude Code always sees a result.
-
----
-
-## CCR vs RTK
-
-| Feature | CCR | RTK |
-|---------|-----|-----|
-| Handler count | **40 (50+ aliases)** | 40+ |
-| Global regex pre-filter | **Yes** (progress bars, spinners, decorators, download lines) | Partial |
-| Minimum token gate | **Yes** (skip pipeline for <15-token outputs) | No |
-| Unknown commands | **BERT routing + confidence tiers** (~40%) | Passthrough (0%) |
-| BERT routing confidence | **Tier system + margin gate + subcommand hints** | N/A |
-| Handler routing | Exact → alias → BERT similarity | Exact match only |
-| Read tool compression | Yes (BERT pipeline ≥50 lines) | — |
-| Glob tool compression | Yes (dir grouping + session dedup) | — |
-| Intent-aware query | Yes (reads live session JSONL) | — |
-| Project noise learning | Yes (auto-promotes at ≥90% suppression) | — |
-| Pre-run structural cache | Yes (git by HEAD+staged+unstaged) | — |
-| Cross-turn output cache | Yes (cosine > 0.92) | — |
-| Elastic context | Yes (scales with session size) | — |
-| User-defined TOML filters | Yes (Level 0, project + global) | — |
-| Missed savings surfaced | Yes (ccr gain + ccr discover) | — |
-| Conversation compression | ccr-sdk: tiered + Ollama + dedup | — |
-| Hooks preserved on init | Yes (merges arrays) | Overwrites |
 
 ---
 
