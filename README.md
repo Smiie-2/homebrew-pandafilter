@@ -152,6 +152,20 @@ Analytics stored in SQLite (`~/.local/share/ccr/analytics.db`). Existing `analyt
 
 Pricing uses `cost_per_million_tokens` from `ccr.toml` if set, otherwise `ANTHROPIC_MODEL` env var (Opus 4.6: $15, Sonnet 4.6: $3, Haiku 4.5: $0.80), otherwise $3.00.
 
+### ccr doctor
+
+Diagnoses the full installation in one command — run this first when something seems wrong:
+
+```bash
+ccr doctor
+```
+
+Checks: hook script exists and is executable · binary path in hook is valid · `settings.json` has PreToolUse + PostToolUse entries · `jq` is in PATH · analytics DB exists and is writable · record count (total + today) · end-to-end rewrite of `git status`.
+
+If `ccr gain` shows 0 runs and all doctor checks pass, the two most common causes are:
+1. **Commands were not run through Claude Code's AI** — hooks only fire when the AI runs tools, not when you type commands in your terminal.
+2. **Claude Code was not restarted** after `ccr init` — hooks in `settings.json` activate at session start.
+
 ### Other commands
 
 ```bash

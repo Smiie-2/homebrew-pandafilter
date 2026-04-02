@@ -438,7 +438,106 @@ assert m and int(m.group(1)) > 0, f'Expected >0 runs, got: {out[:200]}'
 \""
 
 # ─────────────────────────────────────────────────────────────────────────────
-hdr "11. ccr gain — analytics display"
+hdr "11. ccr doctor — installation diagnostics"
+# ─────────────────────────────────────────────────────────────────────────────
+
+run_check "ccr doctor exits 0" \
+  "ccr doctor"
+
+run_check "ccr doctor shows DB path" \
+  "ccr doctor" "DB path"
+
+run_check "ccr doctor shows DB records" \
+  "ccr doctor" "DB records"
+
+run_check "ccr doctor shows hook script" \
+  "ccr doctor" "Hook script"
+
+run_check "ccr doctor shows rewrite check" \
+  "ccr doctor" "ccr run"
+
+# ── Failure scenario 1: DB never created (ccr run never called) ──────────────
+# Test that 0-record state is clearly reported, not silently ignored
+FRESH_XDG=$(mktemp -d)
+FRESH_OUT=$(XDG_DATA_HOME="$FRESH_XDG" ccr doctor 2>&1 || true)
+if echo "$FRESH_OUT" | grep -q "NOT created yet\|0 records\|never been called"; then
+  ok "ccr doctor reports clearly when DB has no records yet"
+else
+  fail "ccr doctor should warn when DB has never been written"
+  echo "    got: $(echo "$FRESH_OUT" | grep -i 'db\|record\|created' | head -3)"
+fi
+rm -rf "$FRESH_XDG"
+
+# ── Failure scenario 2: bad binary path in hook script ───────────────────────
+# Simulate a hook script where the ccr binary path is stale (e.g. after brew upgrade)
+BAD_HOOK_DIR=$(mktemp -d)
+BAD_HOOK="$BAD_HOOK_DIR/ccr-rewrite.sh"
+cat > "$BAD_HOOK" << 'HOOKEOF'
+#!/usr/bin/env bash
+INPUT=$(cat)
+CMD=$(echo "$INPUT" | jq -r '.tool_input.command // empty' 2>/dev/null)
+[ -z "$CMD" ] && exit 0
+# Deliberately broken binary path
+REWRITTEN=$(CCR_SESSION_ID=$PPID "/nonexistent/path/ccr" rewrite "$CMD" 2>/dev/null) || exit 0
+[ "$CMD" = "$REWRITTEN" ] && exit 0
+echo '{"hookSpecificOutput":{"updatedInput":{"command":"'"$REWRITTEN"'"}}}'
+HOOKEOF
+chmod +x "$BAD_HOOK"
+
+# The hook should exit 0 (graceful degradation) even with a bad binary path
+HOOK_INPUT='{"tool_name":"Bash","tool_input":{"command":"git status"}}'
+BAD_EXIT=0
+echo "$HOOK_INPUT" | bash "$BAD_HOOK" > /dev/null 2>&1 || BAD_EXIT=$?
+if [[ "$BAD_EXIT" -eq 0 ]]; then
+  ok "hook script with bad binary path exits 0 (graceful degradation)"
+else
+  fail "hook script with bad binary path should exit 0, got exit $BAD_EXIT"
+fi
+
+# The hook should produce no output (no rewrite) when binary is missing
+BAD_OUT=$(echo "$HOOK_INPUT" | bash "$BAD_HOOK" 2>/dev/null || true)
+if [[ -z "$BAD_OUT" ]]; then
+  ok "hook script with bad binary path produces no output (pass-through)"
+else
+  fail "hook script with bad binary path should produce no output, got: '$BAD_OUT'"
+fi
+
+# After a bad hook, ccr run still works when called directly (ccr in PATH)
+DB_BEFORE=$(sqlite3 "$DATA_DIR/analytics.db" "SELECT COUNT(*) FROM records;" 2>/dev/null || echo 0)
+ccr run git status > /dev/null 2>&1 || true
+DB_AFTER=$(sqlite3 "$DATA_DIR/analytics.db" "SELECT COUNT(*) FROM records;" 2>/dev/null || echo 0)
+if [[ "$DB_AFTER" -gt "$DB_BEFORE" ]]; then
+  ok "ccr run still writes analytics even when PreToolUse hook had a bad binary"
+else
+  fail "ccr run should write analytics even when hook binary is broken"
+fi
+rm -rf "$BAD_HOOK_DIR"
+
+# ── Failure scenario 3: user runs commands themselves (no hook) ───────────────
+# The PreToolUse hook ONLY fires when Claude Code's AI runs tools.
+# If a user types 'git status' in their own terminal, no hook fires, no analytics.
+# Verify: direct git status (no hook) = no new CCR record.
+# Verify: ccr run git status (explicit) = new record.
+DB_BEFORE=$(sqlite3 "$DATA_DIR/analytics.db" "SELECT COUNT(*) FROM records;" 2>/dev/null || echo 0)
+git status > /dev/null 2>&1 || true   # user typing directly — no hook fires
+DB_AFTER=$(sqlite3 "$DATA_DIR/analytics.db" "SELECT COUNT(*) FROM records;" 2>/dev/null || echo 0)
+if [[ "$DB_AFTER" -eq "$DB_BEFORE" ]]; then
+  ok "'git status' run directly (no hook) writes no CCR analytics record"
+else
+  fail "'git status' run directly should NOT write analytics (got ${DB_BEFORE} → ${DB_AFTER})"
+fi
+
+DB_BEFORE=$DB_AFTER
+ccr run git status > /dev/null 2>&1 || true   # routed through CCR explicitly
+DB_AFTER=$(sqlite3 "$DATA_DIR/analytics.db" "SELECT COUNT(*) FROM records;" 2>/dev/null || echo 0)
+if [[ "$DB_AFTER" -gt "$DB_BEFORE" ]]; then
+  ok "'ccr run git status' writes analytics record (${DB_BEFORE} → ${DB_AFTER})"
+else
+  fail "'ccr run git status' should write analytics record"
+fi
+
+# ─────────────────────────────────────────────────────────────────────────────
+hdr "13. ccr gain — analytics display"
 # ─────────────────────────────────────────────────────────────────────────────
 
 ccr run git log --oneline > /dev/null 2>&1 || true
@@ -450,7 +549,7 @@ run_check "ccr gain shows Tokens saved:" "ccr gain" "Tokens saved:"
 run_check "ccr gain --breakdown exits 0" "ccr gain --breakdown"
 
 # ─────────────────────────────────────────────────────────────────────────────
-hdr "12. Analytics migration — JSONL → SQLite"
+hdr "14. Analytics migration — JSONL → SQLite"
 # ─────────────────────────────────────────────────────────────────────────────
 # Simulate a user who has v0.5.x JSONL analytics and upgrades to v0.6.0.
 
@@ -501,7 +600,7 @@ fi
 rm -rf "$MIGRATE_XDG"
 
 # ─────────────────────────────────────────────────────────────────────────────
-hdr "13. SQLite analytics correctness"
+hdr "15. SQLite analytics correctness"
 # ─────────────────────────────────────────────────────────────────────────────
 
 CURRENT_DB="$DATA_DIR/analytics.db"
@@ -537,7 +636,7 @@ else
 fi
 
 # ─────────────────────────────────────────────────────────────────────────────
-hdr "14. ccr expand — zoom-in block retrieval"
+hdr "16. ccr expand — zoom-in block retrieval"
 # ─────────────────────────────────────────────────────────────────────────────
 
 # Generate output with a collapsed block (zoom must be enabled)
@@ -551,7 +650,7 @@ else
 fi
 
 # ─────────────────────────────────────────────────────────────────────────────
-hdr "15. Uninstall — Claude Code"
+hdr "17. Uninstall — Claude Code"
 # ─────────────────────────────────────────────────────────────────────────────
 
 run_check "ccr init --uninstall exits 0" \
@@ -564,7 +663,7 @@ run_check "re-running ccr init after uninstall works" \
   "ccr init && test -f $HOME/.claude/hooks/ccr-rewrite.sh"
 
 # ─────────────────────────────────────────────────────────────────────────────
-hdr "16. Edge cases"
+hdr "18. Edge cases"
 # ─────────────────────────────────────────────────────────────────────────────
 
 run_check "ccr run with no args exits cleanly (shows help)" \

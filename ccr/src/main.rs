@@ -58,6 +58,8 @@ enum Commands {
         #[arg(long)]
         breakdown: bool,
     },
+    /// Diagnose CCR installation: hook scripts, settings, analytics DB
+    Doctor,
     /// PostToolUse hook mode for Claude Code (hidden)
     #[command(hide = true)]
     Hook,
@@ -160,6 +162,7 @@ fn main() {
     let result = match cli.command {
         Commands::Filter { command } => cmd::filter::run(command),
         Commands::Gain { history, days, breakdown } => cmd::gain::run(history, days, breakdown),
+        Commands::Doctor => cmd::doctor::run(),
         Commands::Hook => hook::run(),
         Commands::Init { uninstall, agent } => match (uninstall, agent) {
             (true,  AgentTarget::Claude)  => uninstall_ccr(),

@@ -13,7 +13,5 @@ services:
       - CCR_NO_BERT=1
     # Run as non-root (matches the Dockerfile USER directive)
     user: testuser
-    # Each run gets a fresh container
-    rm: true
     stdin_open: false
     tty: false
