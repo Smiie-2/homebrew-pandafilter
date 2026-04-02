@@ -83,6 +83,58 @@ jobs:
       - name: Rename binary
         run: cp target/${{ matrix.target }}/release/ccr ${{ matrix.asset_name }}
 
+      - name: Smoke test binary
+        env:
+          CCR_NO_BERT: "1"
+        run: |
+          BIN="./${{ matrix.asset_name }}"
+
+          # x86_64-apple-darwin is cross-compiled on the ARM64 runner.
+          # Verify it's a valid Mach-O but skip execution (no Rosetta guarantee in CI).
+          if [[ "${{ matrix.target }}" == "x86_64-apple-darwin" ]]; then
+            file "$BIN" | grep -q "x86_64" && echo "✓ Valid x86_64 Mach-O" || exit 1
+            exit 0
+          fi
+
+          # ── Runs natively on aarch64-apple-darwin and x86_64-unknown-linux-gnu ──
+
+          # 1. Binary executes and reports correct version
+          $BIN --version | grep -qE "^ccr [0-9]+\.[0-9]+\.[0-9]+"
+
+          # 2. Simulate a Claude Code user: create settings.json, run ccr init
+          mkdir -p ~/.claude/hooks
+          echo '{}' > ~/.claude/settings.json
+          $BIN init
+
+          # 3. Hook script exists and is executable
+          test -x ~/.claude/hooks/ccr-rewrite.sh
+
+          # 4. ccr verify reports installed (exit 0)
+          $BIN verify
+
+          # 5. PreToolUse hook script rewrites a supported command
+          REWRITE_IN='{"tool_name":"Bash","tool_input":{"command":"git status"}}'
+          REWRITE_OUT=$(echo "$REWRITE_IN" | bash ~/.claude/hooks/ccr-rewrite.sh)
+          echo "$REWRITE_OUT" | grep -q "ccr" \
+            || { echo "rewrite script did not inject ccr: $REWRITE_OUT"; exit 1; }
+
+          # 6. Filter stdin works
+          printf '  Refreshing state...\n  Refreshing state...\n  Refreshing state...\nPlan: 1 to add.\n' \
+            | $BIN filter --command terraform \
+            | grep -q "collapsed"
+
+          # 7. Run a real git command end-to-end
+          git init /tmp/smoke-repo -q
+          git -C /tmp/smoke-repo config user.email "ci@ccr.test"
+          git -C /tmp/smoke-repo config user.name "CCR CI"
+          git -C /tmp/smoke-repo commit --allow-empty -q -m "init"
+          $BIN run git -C /tmp/smoke-repo status
+
+          # 8. ccr gain exits 0 (analytics written by step 7)
+          $BIN gain
+
+          echo "✓ Smoke test passed (${{ matrix.asset_name }})"
+
       # macOS only: bundle binary + ORT dylib into a tarball so brew install
       # needs no build dependencies and completes in seconds.
       - name: Bundle binary + ORT dylib (macOS)
