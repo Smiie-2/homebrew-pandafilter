@@ -9,6 +9,7 @@ pub mod curl;
 pub mod diff;
 pub mod docker;
 pub mod env;
+pub mod ember;
 pub mod eslint;
 pub mod find;
 pub mod gh;
@@ -129,6 +130,7 @@ fn get_handler_exact(cmd: &str) -> Option<Box<dyn Handler>> {
         "json" => Some(Box::new(json::JsonHandler)),
         "log" => Some(Box::new(log::LogHandler)),
         // Batch 6: New handlers
+        "ember" => Some(Box::new(ember::EmberHandler)),
         "clippy" | "cargo-clippy" => Some(Box::new(clippy::ClippyHandler)),
         "next" | "next.js" => Some(Box::new(next::NextHandler)),
         "playwright" => Some(Box::new(playwright::PlaywrightHandler)),

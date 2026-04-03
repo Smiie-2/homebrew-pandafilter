@@ -1,0 +1,23 @@
+{"Action":"run","Package":"github.com/user/repo/pkg/api","Test":"TestCreateUser"}
+{"Action":"output","Package":"github.com/user/repo/pkg/api","Test":"TestCreateUser","Output":"=== RUN   TestCreateUser\n"}
+{"Action":"output","Package":"github.com/user/repo/pkg/api","Test":"TestCreateUser","Output":"    api_test.go:45: expected status 201, got 400\n"}
+{"Action":"output","Package":"github.com/user/repo/pkg/api","Test":"TestCreateUser","Output":"    api_test.go:46: body: {\"error\":\"email required\"}\n"}
+{"Action":"fail","Package":"github.com/user/repo/pkg/api","Test":"TestCreateUser","Elapsed":0.012}
+{"Action":"run","Package":"github.com/user/repo/pkg/api","Test":"TestGetUser"}
+{"Action":"output","Package":"github.com/user/repo/pkg/api","Test":"TestGetUser","Output":"=== RUN   TestGetUser\n"}
+{"Action":"pass","Package":"github.com/user/repo/pkg/api","Test":"TestGetUser","Elapsed":0.003}
+{"Action":"run","Package":"github.com/user/repo/pkg/api","Test":"TestDeleteUser"}
+{"Action":"output","Package":"github.com/user/repo/pkg/api","Test":"TestDeleteUser","Output":"=== RUN   TestDeleteUser\n"}
+{"Action":"pass","Package":"github.com/user/repo/pkg/api","Test":"TestDeleteUser","Elapsed":0.004}
+{"Action":"fail","Package":"github.com/user/repo/pkg/api","Elapsed":0.021}
+{"Action":"run","Package":"github.com/user/repo/pkg/util","Test":"TestParseDate"}
+{"Action":"output","Package":"github.com/user/repo/pkg/util","Test":"TestParseDate","Output":"=== RUN   TestParseDate\n"}
+{"Action":"pass","Package":"github.com/user/repo/pkg/util","Test":"TestParseDate","Elapsed":0.001}
+{"Action":"run","Package":"github.com/user/repo/pkg/util","Test":"TestFormatDate"}
+{"Action":"output","Package":"github.com/user/repo/pkg/util","Test":"TestFormatDate","Output":"=== RUN   TestFormatDate\n"}
+{"Action":"pass","Package":"github.com/user/repo/pkg/util","Test":"TestFormatDate","Elapsed":0.001}
+{"Action":"run","Package":"github.com/user/repo/pkg/util","Test":"TestValidateEmail"}
+{"Action":"output","Package":"github.com/user/repo/pkg/util","Test":"TestValidateEmail","Output":"=== RUN   TestValidateEmail\n"}
+{"Action":"output","Package":"github.com/user/repo/pkg/util","Test":"TestValidateEmail","Output":"    util_test.go:88: expected true for valid@example.com, got false\n"}
+{"Action":"fail","Package":"github.com/user/repo/pkg/util","Test":"TestValidateEmail","Elapsed":0.002}
+{"Action":"fail","Package":"github.com/user/repo/pkg/util","Elapsed":0.005}

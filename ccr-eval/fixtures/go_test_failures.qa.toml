@@ -1,0 +1,25 @@
+command_hint = "go"
+
+[[questions]]
+question = "Which test failed in the api package?"
+key_facts = ["TestCreateUser"]
+
+[[questions]]
+question = "What was the expected HTTP status code in the failing test?"
+key_facts = ["201"]
+
+[[questions]]
+question = "How many tests passed in the api package?"
+key_facts = ["2", "two"]
+
+[[questions]]
+question = "Which test failed in the util package?"
+key_facts = ["TestValidateEmail"]
+
+[[questions]]
+question = "Did the util package's TestParseDate pass or fail?"
+key_facts = ["pass", "passed"]
+
+[[questions]]
+question = "How many packages had failures?"
+key_facts = ["2", "two", "api", "util"]

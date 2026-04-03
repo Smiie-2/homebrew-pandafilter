@@ -1,0 +1,25 @@
+command_hint = "go"
+
+[[questions]]
+question = "Which file and line number has the 'undefined: UserRepository' error?"
+key_facts = ["handler.go", "23"]
+
+[[questions]]
+question = "What is wrong on line 89 of handler.go?"
+key_facts = ["too many arguments", "Save"]
+
+[[questions]]
+question = "Which file has a syntax error?"
+key_facts = ["routes.go", "58"]
+
+[[questions]]
+question = "What variable was declared and not used?"
+key_facts = ["mux"]
+
+[[questions]]
+question = "How many packages failed to build?"
+key_facts = ["2", "two", "api", "server"]
+
+[[questions]]
+question = "Did the build succeed or fail?"
+key_facts = ["fail", "error", "undefined"]

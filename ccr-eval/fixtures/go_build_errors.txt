@@ -1,0 +1,9 @@
+# github.com/user/repo/pkg/api
+./handler.go:23:15: undefined: UserRepository
+./handler.go:67:9: cannot use req.Body (variable of type io.ReadCloser) as type io.Reader in argument to json.NewDecoder
+./handler.go:89:3: too many arguments in call to h.db.Save
+# github.com/user/repo/pkg/server
+./server.go:14:8: cannot find package "github.com/user/repo/pkg/middleware" in any of:
+./server.go:45:12: undefined: NewRouter
+./routes.go:31:5: declared and not used: mux
+./routes.go:58:1: syntax error: unexpected }, expected expression

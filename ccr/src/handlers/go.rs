@@ -17,6 +17,10 @@ impl Handler for GoHandler {
 
     fn filter(&self, output: &str, args: &[String]) -> String {
         let subcmd = args.get(1).map(|s| s.as_str()).unwrap_or("");
+        // go tool golangci-lint → delegate to golangci-lint handler
+        if subcmd == "tool" && args.get(2).map(|s| s.as_str()) == Some("golangci-lint") {
+            return crate::handlers::golangci_lint::filter_lint(output);
+        }
         match subcmd {
             "build" | "install" | "vet" => filter_build(output),
             "test" => filter_test(output),
@@ -56,23 +60,33 @@ fn filter_build(output: &str) -> String {
     errors.join("\n")
 }
 
+/// Strip module prefix from a package path, returning just the last segment.
+/// e.g. `github.com/user/repo/pkg/server` → `server`
+fn compact_package_name(pkg: &str) -> &str {
+    pkg.rsplit('/').next().unwrap_or(pkg)
+}
+
 /// Parse `go test -json` structured output.
-/// Each line is a JSON event object.  We collect output for failing tests,
-/// suppress passing test detail, and emit a concise summary.
+/// Tracks per-package pass/fail/skip counts, groups failures under their package,
+/// and emits compact per-package summary lines.
 fn filter_test_json(output: &str) -> String {
     use std::collections::HashMap;
 
+    // Per-test buffered output lines
     let mut test_output: HashMap<String, Vec<String>> = HashMap::new();
+    // Per-package counts: (pass, fail, skip)
+    let mut pkg_counts: HashMap<String, (usize, usize, usize)> = HashMap::new();
+
     let mut failures: Vec<String> = Vec::new();
-    let mut pass_count = 0usize;
-    let mut fail_count = 0usize;
+    let mut pkg_summaries: Vec<String> = Vec::new();
+    let mut any_failure = false;
 
     for line in output.lines() {
         let line = line.trim();
         if line.is_empty() {
             continue;
         }
-        // Lines that are not JSON (e.g. panic output) are kept verbatim
+        // Non-JSON lines (e.g. panic output) — keep verbatim
         if !line.starts_with('{') {
             failures.push(line.to_string());
             continue;
@@ -82,7 +96,9 @@ fn filter_test_json(output: &str) -> String {
         };
         let action = v.get("Action").and_then(|a| a.as_str()).unwrap_or("");
         let test   = v.get("Test").and_then(|t| t.as_str()).unwrap_or("").to_string();
-        let pkg    = v.get("Package").and_then(|p| p.as_str()).unwrap_or("?");
+        let pkg    = v.get("Package").and_then(|p| p.as_str()).unwrap_or("?").to_string();
+
+        let counts = pkg_counts.entry(pkg.clone()).or_insert((0, 0, 0));
 
         match action {
             "output" => {
@@ -91,18 +107,22 @@ fn filter_test_json(output: &str) -> String {
                 }
             }
             "pass" if !test.is_empty() => {
-                pass_count += 1;
+                counts.0 += 1;
                 test_output.remove(&test); // discard passing test output
             }
+            "skip" if !test.is_empty() => {
+                counts.2 += 1;
+                test_output.remove(&test);
+            }
             "fail" if !test.is_empty() => {
-                fail_count += 1;
+                counts.1 += 1;
+                any_failure = true;
                 failures.push(format!("--- FAIL: {}", test));
                 if let Some(lines) = test_output.remove(&test) {
                     let mut count = 0usize;
                     for l in &lines {
                         let l = l.trim_end_matches('\n');
                         let t = l.trim();
-                        // Skip RUN/FAIL/PASS markers already captured elsewhere
                         if t.is_empty()
                             || t.starts_with("=== RUN")
                             || t.starts_with("--- FAIL")
@@ -120,36 +140,59 @@ fn filter_test_json(output: &str) -> String {
                 }
             }
             "fail" if test.is_empty() => {
-                // Package-level failure summary
-                let elapsed = v.get("Elapsed").and_then(|e| e.as_f64()).unwrap_or(0.0);
-                failures.push(format!("FAIL\t{}\t{:.3}s", pkg, elapsed));
+                // Package-level failure — emit compact summary
+                any_failure = true;
+                let (p, f, s) = pkg_counts.get(&pkg).copied().unwrap_or((0, 0, 0));
+                let short = compact_package_name(&pkg);
+                if p > 0 || f > 0 || s > 0 {
+                    let mut parts = vec![format!("{} passed", p)];
+                    if f > 0 { parts.push(format!("{} failed", f)); }
+                    if s > 0 { parts.push(format!("{} skipped", s)); }
+                    pkg_summaries.push(format!("FAIL {} [{}]", short, parts.join(", ")));
+                } else {
+                    let elapsed = v.get("Elapsed").and_then(|e| e.as_f64()).unwrap_or(0.0);
+                    pkg_summaries.push(format!("FAIL\t{}\t{:.3}s", pkg, elapsed));
+                }
             }
             "pass" if test.is_empty() => {
-                // Package-level pass summary
-                let elapsed = v.get("Elapsed").and_then(|e| e.as_f64()).unwrap_or(0.0);
-                failures.push(format!("ok  \t{}\t{:.3}s", pkg, elapsed));
+                // Package-level pass — emit compact summary
+                let (p, _, s) = pkg_counts.get(&pkg).copied().unwrap_or((0, 0, 0));
+                let short = compact_package_name(&pkg);
+                if p > 0 || s > 0 {
+                    let mut parts = vec![format!("{} passed", p)];
+                    if s > 0 { parts.push(format!("{} skipped", s)); }
+                    pkg_summaries.push(format!("ok  {} [{}]", short, parts.join(", ")));
+                } else {
+                    let elapsed = v.get("Elapsed").and_then(|e| e.as_f64()).unwrap_or(0.0);
+                    pkg_summaries.push(format!("ok  \t{}\t{:.3}s", pkg, elapsed));
+                }
             }
             _ => {}
         }
     }
 
-    if fail_count == 0 && failures.iter().all(|l| l.starts_with("ok  \t")) {
-        if pass_count > 0 {
-            failures.push(format!("[{} tests passed]", pass_count));
+    let total_pass: usize = pkg_counts.values().map(|(p, _, _)| *p).sum();
+
+    let mut out: Vec<String> = failures;
+    out.extend(pkg_summaries);
+
+    if !any_failure && out.iter().all(|l| l.starts_with("ok  ")) {
+        if total_pass > 0 {
+            out.push(format!("[{} tests passed]", total_pass));
         } else {
             return "[all tests passed]".to_string();
         }
-        return failures.join("\n");
+        return out.join("\n");
     }
 
-    if pass_count > 0 {
-        failures.push(format!("[{} tests passed]", pass_count));
+    if total_pass > 0 {
+        out.push(format!("[{} tests passed]", total_pass));
     }
 
-    if failures.is_empty() {
+    if out.is_empty() {
         "[all tests passed]".to_string()
     } else {
-        failures.join("\n")
+        out.join("\n")
     }
 }
 
@@ -430,5 +473,152 @@ mod tests {
         let result = filter_mod(output);
         assert!(result.contains("go: downloading"), "should keep go: lines");
         assert!(!result.contains("some noise"), "should drop noise");
+    }
+
+    // ── compact_package_name ──────────────────────────────────────────────────
+
+    #[test]
+    fn compact_strips_module_prefix() {
+        assert_eq!(compact_package_name("github.com/user/repo/pkg/server"), "server");
+        assert_eq!(compact_package_name("github.com/user/repo"), "repo");
+    }
+
+    #[test]
+    fn compact_leaves_short_name_unchanged() {
+        assert_eq!(compact_package_name("server"), "server");
+        assert_eq!(compact_package_name(""), "");
+    }
+
+    // ── filter_test_json improvements ─────────────────────────────────────────
+
+    fn json_event(action: &str, pkg: &str, test: Option<&str>, output: Option<&str>) -> String {
+        let test_field = test
+            .map(|t| format!(r#","Test":"{}""#, t))
+            .unwrap_or_default();
+        let out_field = output
+            .map(|o| format!(r#","Output":"{}""#, o.replace('\n', "\\n")))
+            .unwrap_or_default();
+        format!(
+            r#"{{"Action":"{}","Package":"{}"{}{}}}"#,
+            action, pkg, test_field, out_field
+        )
+    }
+
+    #[test]
+    fn json_test_compact_package_name_in_pass_summary() {
+        let pkg = "github.com/user/repo/pkg/util";
+        let lines = vec![
+            json_event("run",  pkg, Some("TestU1"), None),
+            json_event("pass", pkg, Some("TestU1"), None),
+            json_event("run",  pkg, Some("TestU2"), None),
+            json_event("pass", pkg, Some("TestU2"), None),
+            json_event("pass", pkg, None, None),
+        ];
+        let result = filter_test_json(&lines.join("\n"));
+        // The summary should use the short name "util", not the full module path
+        assert!(
+            result.contains("util") && !result.contains("github.com"),
+            "should compact package name: got {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn json_test_compact_package_name_in_fail_summary() {
+        let pkg = "github.com/user/repo/pkg/server";
+        // One failing test, then package fail
+        let lines = vec![
+            json_event("run", pkg, Some("TestFoo"), None),
+            json_event("output", pkg, Some("TestFoo"), Some("    foo_test.go:5: expected 1 got 2\n")),
+            json_event("fail", pkg, Some("TestFoo"), None),
+            json_event("fail", pkg, None, None),
+        ];
+        let result = filter_test_json(&lines.join("\n"));
+        assert!(
+            result.contains("server") && !result.contains("github.com"),
+            "should compact package name in FAIL summary: got {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn json_test_per_package_counts_in_summary() {
+        let pkg = "github.com/user/repo/pkg/api";
+        let lines = vec![
+            json_event("run",  pkg, Some("TestA"), None),
+            json_event("pass", pkg, Some("TestA"), None),
+            json_event("run",  pkg, Some("TestB"), None),
+            json_event("pass", pkg, Some("TestB"), None),
+            json_event("run",  pkg, Some("TestC"), None),
+            json_event("output", pkg, Some("TestC"), Some("    c_test.go:1: boom\n")),
+            json_event("fail", pkg, Some("TestC"), None),
+            json_event("fail", pkg, None, None),
+        ];
+        let result = filter_test_json(&lines.join("\n"));
+        // Summary should say "2 passed, 1 failed"
+        assert!(
+            result.contains("2 passed") && result.contains("1 failed"),
+            "should include per-package counts: got {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn json_test_multi_package_mixed() {
+        let pkg_ok  = "github.com/user/repo/pkg/util";
+        let pkg_bad = "github.com/user/repo/pkg/api";
+        let lines = vec![
+            // util: 3 passing
+            json_event("run",  pkg_ok,  Some("TestU1"), None),
+            json_event("pass", pkg_ok,  Some("TestU1"), None),
+            json_event("run",  pkg_ok,  Some("TestU2"), None),
+            json_event("pass", pkg_ok,  Some("TestU2"), None),
+            json_event("run",  pkg_ok,  Some("TestU3"), None),
+            json_event("pass", pkg_ok,  Some("TestU3"), None),
+            json_event("pass", pkg_ok,  None, None),
+            // api: 1 passing, 1 failing
+            json_event("run",  pkg_bad, Some("TestA1"), None),
+            json_event("pass", pkg_bad, Some("TestA1"), None),
+            json_event("run",  pkg_bad, Some("TestA2"), None),
+            json_event("output", pkg_bad, Some("TestA2"), Some("    api_test.go:9: want 0 got 1\n")),
+            json_event("fail", pkg_bad, Some("TestA2"), None),
+            json_event("fail", pkg_bad, None, None),
+        ];
+        let result = filter_test_json(&lines.join("\n"));
+        assert!(result.contains("ok  util"), "should show ok util summary");
+        assert!(result.contains("FAIL api"), "should show FAIL api summary");
+        assert!(result.contains("1 passed, 1 failed"), "api should show counts");
+        assert!(result.contains("3 passed"), "util should show 3 passed");
+    }
+
+    // ── go tool golangci-lint routing ─────────────────────────────────────────
+
+    #[test]
+    fn tool_golangci_lint_routes_to_lint_handler() {
+        let args: Vec<String> = vec![
+            "go".to_string(),
+            "tool".to_string(),
+            "golangci-lint".to_string(),
+            "run".to_string(),
+        ];
+        let output = "src/main.go:10:5: unused variable x (deadcode)\n\
+                      INFO [runner] done";
+        let result = GoHandler.filter(output, &args);
+        // Should NOT pass through raw; should apply golangci-lint filtering
+        assert!(!result.contains("INFO [runner]"), "should drop INFO lines");
+        assert!(result.contains("main.go"), "should keep diagnostic");
+    }
+
+    #[test]
+    fn tool_golangci_lint_clean_run() {
+        let args: Vec<String> = vec![
+            "go".to_string(),
+            "tool".to_string(),
+            "golangci-lint".to_string(),
+            "run".to_string(),
+        ];
+        let output = "INFO [config] Config search paths: [/home/user]\nINFO [loader] done\n";
+        let result = GoHandler.filter(output, &args);
+        assert!(result.contains("No issues") || result == "No issues found.");
     }
 }
