@@ -137,6 +137,8 @@ ccr gain                    # overall summary
 ccr gain --breakdown        # per-command table
 ccr gain --history          # last 14 days
 ccr gain --history --days 7
+ccr gain --insight          # categorized savings + top saves
+ccr gain --insight --days 7
 ```
 
 ```
@@ -149,7 +151,34 @@ CCR Token Savings
   Top command:    (pipeline)  65.2%  ·  25.8k saved
 ```
 
-Analytics stored in SQLite (`~/.local/share/ccr/analytics.db`). Existing `analytics.jsonl` files are migrated automatically on first run.
+`--insight` breaks down *where* savings came from and surfaces the biggest individual wins:
+
+```
+Your token savings  (last 14 days)
+═══════════════════════════════════════════════════════
+
+  Noise reduction        1.74M   60%   ls × 144, find × 96
+  Build filtering         737k   25%   cargo × 210
+  Command compression     411k   14%   git × 159, grep × 136
+  Pipeline savings          5k    0%   (pipeline) × 248, incl. 61 cache hits
+
+  Top 5 saves:
+    find …/Desktop/ccr               Apr 05    747k
+    find …/Desktop/ccr               Apr 05    745k
+    grep …ccr-rewrite|.cursor/       Apr 01    177k
+    cargo build                      Mar 31    105k
+    git diff                         Mar 30     92k
+
+  Total saved: 2.90M
+```
+
+The four categories:
+- **Noise reduction** — `find`, `ls`, `tree` output that adds no signal
+- **Build filtering** — `cargo`, `go`, `npm`, `pytest`, `ember`, and other build/test/lint tools
+- **Pipeline savings** — Read, Glob, and Grep tool outputs filtered by CCR; cache hits
+- **Command compression** — everything else (`git`, `grep`, `docker`, `kubectl`, …)
+
+Analytics stored in SQLite (`~/.local/share/ccr/analytics.db`). Records older than 365 days are pruned automatically. Existing `analytics.jsonl` files are migrated on first run.
 
 Pricing uses `cost_per_million_tokens` from `ccr.toml` if set, otherwise `ANTHROPIC_MODEL` env var (Opus 4.6: $15, Sonnet 4.6: $3, Haiku 4.5: $0.80), otherwise $3.00.
 
