@@ -156,7 +156,7 @@ jobs:
           # Compatibility shim so old `ccr` hooks keep working with a deprecation notice
           cat > bundle/ccr <<'SHIM'
 #!/usr/bin/env bash
-echo "⚠️  'ccr' has been renamed to 'panda' in v0.6.12." >&2
+echo "WARNING: 'ccr' has been renamed to 'panda' in v0.6.12." >&2
 echo "   Update your hooks: panda init" >&2
 echo "" >&2
 exec "$(dirname "$0")/panda" "$@"
