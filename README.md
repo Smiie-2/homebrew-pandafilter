@@ -35,13 +35,13 @@ brew install ccr
 curl -fsSL https://raw.githubusercontent.com/AssafWoo/homebrew-pandafilter/main/install.sh | bash
 ```
 
-> **First run:** CCR downloads the BERT model (~90 MB, `all-MiniLM-L6-v2`) from HuggingFace and caches it at `~/.cache/huggingface/`. Subsequent runs are instant.
+> **First run:** PandaFilter downloads the BERT model (~90 MB, `all-MiniLM-L6-v2`) from HuggingFace and caches it at `~/.cache/huggingface/`. Subsequent runs are instant.
 
 ---
 
-## Why CCR?
+## Why PandaFilter?
 
-AI coding agents are expensive to run — not because of what you ask them, but because of what they read back. Every `cargo build`, `git log`, or `npm install` dumps thousands of tokens of noise into the context window. I built CCR to fix that transparently: it sits between your agent and your shell, compresses the output, and hands back only what the model needs. No config changes, no workflow changes — just less waste.
+AI coding agents are expensive to run — not because of what you ask them, but because of what they read back. Every `cargo build`, `git log`, or `npm install` dumps thousands of tokens of noise into the context window. I built PandaFilter to fix that transparently: it sits between your agent and your shell, compresses the output, and hands back only what the model needs. No config changes, no workflow changes — just less waste.
 
 ---
 
@@ -59,7 +59,7 @@ AI coding agents are expensive to run — not because of what you ask them, but 
 
 Numbers from `ccr/tests/handler_benchmarks.rs`. Run `cargo test -p ccr benchmark -- --nocapture` to reproduce, or `ccr gain` to see your own live data.
 
-| Operation | Without CCR | With CCR | Savings |
+| Operation | Without PandaFilter | With PandaFilter | Savings |
 |-----------|------------:|---------:|:-------:|
 | `pip install` | 1,787 | 9 | **−99%** |
 | `uv sync` | 1,574 | 15 | **−99%** |
@@ -107,7 +107,7 @@ Numbers from `ccr/tests/handler_benchmarks.rs`. Run `cargo test -p ccr benchmark
 
 ## Compared to doing nothing
 
-| Scenario | Without CCR | With CCR |
+| Scenario | Without PandaFilter | With PandaFilter |
 |---|---|---|
 | `cargo build` (errors) | 1,923 tokens | 93 tokens |
 | `pytest` (all passing) | 3,818 tokens | 162 tokens |
@@ -118,7 +118,7 @@ Numbers from `ccr/tests/handler_benchmarks.rs`. Run `cargo test -p ccr benchmark
 
 ## Commands
 
-**`ccr init`** — wire CCR into your agent's hooks:
+**`ccr init`** — wire PandaFilter into your agent's hooks:
 
 ```bash
 ccr init                              # Claude Code (default)
@@ -144,13 +144,13 @@ ccr gain --insight          # categorized savings + top saves
 
 ```bash
 ccr verify                            # check hook integrity for all installed agents
-ccr discover                          # scan Claude history for commands that ran without CCR
+ccr discover                          # scan Claude history for commands that ran without PandaFilter
 ccr noise                             # show learned noise patterns; --reset to clear
 ccr expand ZI_3                       # print original lines from a collapsed block
 ccr read-file src/main.rs --level auto  # apply read-level filter and print savings
 ccr compress --scan-session           # compress current conversation context
 ccr filter --command cargo            # filter stdin as if it were cargo output
-ccr run git status                    # run through CCR handler manually
+ccr run git status                    # run through PandaFilter handler manually
 ccr proxy git status                  # run raw (no filtering), record analytics baseline
 ```
 
@@ -338,7 +338,7 @@ All agents share the same binary and compression pipeline.
 
 **PostToolUse:** Bash → full pipeline; Read → BERT + session dedup; Glob → grouped by directory; Grep → compact paths.
 
-**Hook integrity:** `ccr init` writes SHA-256 baselines (chmod 0o444). CCR verifies at every invocation and exits 1 with a warning if tampered. `ccr verify` checks all installed agents.
+**Hook integrity:** `ccr init` writes SHA-256 baselines (chmod 0o444). PandaFilter verifies at every invocation and exits 1 with a warning if tampered. `ccr verify` checks all installed agents.
 
 </details>
 
@@ -378,16 +378,16 @@ rm -rf ~/.cache/huggingface/hub/models--sentence-transformers--all-MiniLM-L6-v2
 
 ## FAQ
 
-**Does CCR degrade Claude's output quality?**
-No. CCR only removes noise — build logs, module graphs, passing test lines, progress bars. Errors, file paths, and summaries are always kept.
+**Does PandaFilter degrade Claude's output quality?**
+No. PandaFilter only removes noise — build logs, module graphs, passing test lines, progress bars. Errors, file paths, and summaries are always kept.
 
-**What about tools CCR doesn't know?**
-BERT semantic routing matches against all known handlers. If confidence is high enough the closest handler applies; otherwise output passes through unchanged. CCR never silently drops output.
+**What about tools PandaFilter doesn't know?**
+BERT semantic routing matches against all known handlers. If confidence is high enough the closest handler applies; otherwise output passes through unchanged. PandaFilter never silently drops output.
 
 **How do I verify it's working?**
 `ccr gain` after a session. To inspect what the model received from a specific command: `ccr proxy git log --oneline -20`.
 
-**Does CCR send any data outside my machine?**
+**Does PandaFilter send any data outside my machine?**
 Never. All processing is fully local. BERT runs on-device.
 
 ---
