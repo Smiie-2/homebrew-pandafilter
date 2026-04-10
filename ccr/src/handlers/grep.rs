@@ -200,14 +200,6 @@ fn split_grep_line(line: &str) -> Option<(String, &str)> {
     None
 }
 
-fn truncate_line(line: &str, max: usize) -> String {
-    let chars: Vec<char> = line.chars().collect();
-    if chars.len() <= max {
-        line.to_string()
-    } else {
-        format!("{}…", chars[..max - 1].iter().collect::<String>())
-    }
-}
 
 #[cfg(test)]
 mod tests {

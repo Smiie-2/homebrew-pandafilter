@@ -1,14 +1,14 @@
 /// Demonstration of conversation compression.
 ///
 /// Run with:
-///   cargo run -p ccr-sdk --example conv_compress
+///   cargo run -p panda-sdk --example conv_compress
 ///
 /// Shows token savings and which sentences survived for each user turn.
-use ccr_core::tokens::count_tokens;
-use ccr_sdk::compressor::CompressionConfig;
-use ccr_sdk::message::Message;
-use ccr_sdk::ollama::OllamaConfig;
-use ccr_sdk::optimizer::Optimizer;
+use panda_core::tokens::count_tokens;
+use panda_sdk::compressor::CompressionConfig;
+use panda_sdk::message::Message;
+use panda_sdk::ollama::OllamaConfig;
+use panda_sdk::optimizer::Optimizer;
 
 fn main() {
     let conversation = vec![
