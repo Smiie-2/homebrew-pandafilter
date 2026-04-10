@@ -200,7 +200,7 @@ fn filter_log(output: &str) -> String {
         .collect();
 
     if total > 50 {
-        result.push(format!("[+{} more commits]", total - 50));
+        result.push(format!("[+{} more commits, {} total]", total - 50, total));
     }
     result.join("\n")
 }

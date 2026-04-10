@@ -1,0 +1,30 @@
+sending incremental file list
+./
+deploy/
+deploy/app.tar.gz
+deploy/config.yml
+deploy/migrations/
+deploy/migrations/0043_add_users_table.sql
+deploy/migrations/0044_add_indexes.sql
+deploy/scripts/
+deploy/scripts/run.sh
+deploy/static/
+deploy/static/main.css
+deploy/static/main.js
+deploy/static/logo.png
+
+          1,234  100%    0.00kB/s    0:00:00 (xfr#1, to-chk=11/13)
+         45,678  100%   43.63kB/s    0:00:01 (xfr#2, to-chk=10/13)
+          2,048  100%    1.96kB/s    0:00:01 (xfr#3, to-chk=9/13)
+         12,345  100%   11.79kB/s    0:00:01 (xfr#4, to-chk=8/13)
+         98,765  100%   94.30kB/s    0:00:01 (xfr#5, to-chk=7/13)
+         34,567  100%   33.01kB/s    0:00:01 (xfr#6, to-chk=6/13)
+          8,192  100%    7.82kB/s    0:00:01 (xfr#7, to-chk=5/13)
+          4,096  100%    3.91kB/s    0:00:01 (xfr#8, to-chk=4/13)
+         67,890  100%   64.83kB/s    0:00:01 (xfr#9, to-chk=3/13)
+        123,456  100%  117.87kB/s    0:00:01 (xfr#10, to-chk=2/13)
+         56,789  100%   54.21kB/s    0:00:01 (xfr#11, to-chk=1/13)
+         89,012  100%   84.97kB/s    0:00:01 (xfr#12, to-chk=0/13)
+
+sent 544,072 bytes  received 256 bytes  362,218.67 bytes/sec
+total size is 538,072  speedup is 0.99

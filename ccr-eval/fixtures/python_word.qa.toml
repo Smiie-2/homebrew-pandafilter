@@ -1,0 +1,21 @@
+command_hint = "python"
+
+[[questions]]
+question = "What is the title of the document?"
+key_facts = ["API Integration Technical Specification", "v2.0"]
+
+[[questions]]
+question = "What is the base URL for all API endpoints?"
+key_facts = ["api.internal.acme.com/v2", "https://api.internal.acme.com"]
+
+[[questions]]
+question = "How long do OAuth tokens last before expiring?"
+key_facts = ["3600", "3600 seconds", "one hour"]
+
+[[questions]]
+question = "What HTTP method and path is used to create an order?"
+key_facts = ["POST", "/orders/create"]
+
+[[questions]]
+question = "How long after creation can an order be cancelled?"
+key_facts = ["30 minutes", "30"]

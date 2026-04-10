@@ -1,0 +1,71 @@
+Opening document: technical_spec_v2.docx
+Document('technical_spec_v2.docx')
+Paragraph(style='Title')
+style=Title
+bold=True
+font=Calibri, size=24
+API Integration Technical Specification v2.0
+runs=[Run('API Integration Technical Specification v2.0')]
+Paragraph(style='Heading 1')
+style=Heading 1
+bold=True
+font=Calibri, size=16
+1. Overview
+runs=[Run('1. Overview')]
+Paragraph(style='Normal')
+style=Normal
+This document describes the integration between the payment service and the inventory management system. All API calls must be authenticated using OAuth 2.0 bearer tokens.
+runs=[Run('This document describes...')]
+Paragraph(style='Normal')
+style=Normal
+The base URL for all endpoints is https://api.internal.acme.com/v2. Rate limiting is enforced at 1000 requests per minute per client.
+runs=[Run('The base URL...')]
+Paragraph(style='Heading 1')
+style=Heading 1
+bold=True
+2. Authentication
+runs=[Run('2. Authentication')]
+Paragraph(style='Normal')
+style=Normal
+All requests require an Authorization header with a Bearer token obtained from the OAuth 2.0 endpoint at /auth/token. Tokens expire after 3600 seconds.
+runs=[Run('All requests require...')]
+Paragraph(style='Heading 2')
+style=Heading 2
+bold=True
+2.1 Token Request
+runs=[Run('2.1 Token Request')]
+Paragraph(style='Normal')
+style=Normal
+POST /auth/token with client_id and client_secret in the request body. The response includes access_token, token_type, and expires_in fields.
+runs=[Run('POST /auth/token...')]
+Paragraph(style='Heading 1')
+style=Heading 1
+bold=True
+3. Endpoints
+runs=[Run('3. Endpoints')]
+Paragraph(style='Normal')
+style=Normal
+GET /inventory/items — Returns a paginated list of inventory items. Supports filter by category, status, and warehouse_id.
+runs=[Run('GET /inventory/items...')]
+Paragraph(style='Normal')
+style=Normal
+POST /orders/create — Creates a new order. Requires items array with product_id and quantity. Returns order_id and estimated_delivery.
+runs=[Run('POST /orders/create...')]
+Paragraph(style='Normal')
+style=Normal
+PUT /orders/{order_id}/cancel — Cancels an existing order. Only allowed within 30 minutes of creation.
+runs=[Run('PUT /orders/{order_id}/cancel...')]
+Paragraph(style='Heading 1')
+style=Heading 1
+bold=True
+4. Error Handling
+runs=[Run('4. Error Handling')]
+Paragraph(style='Normal')
+style=Normal
+All errors return HTTP status codes with a JSON body containing code, message, and request_id. Retry with exponential backoff for 429 and 503 responses.
+runs=[Run('All errors return...')]
+Paragraph(style='Normal')
+style=Normal
+Maximum retry attempts: 3. Initial backoff: 1 second. Maximum backoff: 30 seconds.
+runs=[Run('Maximum retry attempts...')]
+Total paragraphs: 14

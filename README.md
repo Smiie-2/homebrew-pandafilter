@@ -157,9 +157,9 @@ ccr proxy git status                  # run raw (no filtering), record analytics
 ---
 
 <details>
-<summary><strong>Handlers (49 handlers)</strong></summary>
+<summary><strong>Handlers (51 handlers)</strong></summary>
 
-49 handlers (60+ command aliases) in `ccr/src/handlers/`. Lookup cascade:
+51 handlers (60+ command aliases) in `ccr/src/handlers/`. Lookup cascade:
 
 1. **User filters** — `.ccr/filters.toml` or `~/.config/ccr/filters.toml`
 2. **Exact match** — direct command name
@@ -168,14 +168,14 @@ ccr proxy git status                  # run raw (no filtering), record analytics
 
 | Handler | Keys | Key behavior |
 |---------|------|-------------|
-| **cargo** | `cargo` | `build`/`clippy`: errors + warning count. `test`: failures + summary. |
-| **git** | `git` | `status`: counts. `log`: `--oneline`, cap 20. `diff`: 2 context lines, 200-line cap. |
+| **cargo** | `cargo` | `build`/`clippy`: errors (capped at 15) + warning count. `test`: failures + summary. `nextest run`: FAIL lines + Summary. |
+| **git** | `git` | `status`: counts. `log`: `--oneline`, cap 50 with total. `diff`: 2 context lines, 200-line cap. |
 | **go** | `go` | `test`: NDJSON streaming, FAIL blocks + summary. `build`: errors only. |
 | **ember** | `ember` | `build`: errors + summary; drops fingerprint/asset spam. `test`: failures + summary. `serve`: serving URL only. |
 | **tsc** | `tsc` | Errors grouped by file; deduplicates repeated TS codes. `Build OK` on clean. Injects `--noEmit`. |
 | **vitest** | `vitest` | FAIL blocks + summary; drops `✓` lines. |
 | **jest** | `jest`, `bun`, `deno` | `●` failure blocks + summary; drops `PASS` lines. |
-| **pytest** | `pytest` | FAILED node IDs + AssertionError + short summary. |
+| **pytest** | `pytest` | FAILED node IDs + AssertionError + short summary. Injects `--tb=short`. |
 | **rspec** | `rspec` | Injects `--format json`; example-level failures with message + location. |
 | **rubocop** | `rubocop` | Injects `--format json`; offenses grouped by severity, capped. |
 | **rake** | `rake`, `bundle` | Failure/error blocks + summary; drops passing test lines. |
@@ -183,7 +183,7 @@ ccr proxy git status                  # run raw (no filtering), record analytics
 | **ruff** | `ruff` | Violations grouped by error code. `format`: summary line only. |
 | **uv** | `uv`, `uvx` | Strips Downloading/Fetching/Preparing noise; keeps errors + summary. |
 | **pip** | `pip`, `poetry`, `pdm`, `conda` | `install`: `[complete — N packages]` or already-satisfied short-circuit. |
-| **python** | `python` | Traceback: keep block + final error. Long output: BERT. |
+| **python** | `python` | Traceback: keep block + final error. Detects and compresses tabular/CSV, pandas DataFrames, Word (.docx), Excel (.xlsx), and PowerPoint (.pptx) output. Long output: BERT. |
 | **eslint** | `eslint` | Errors grouped by file, caps at 20 + `[+N more]`. |
 | **next** | `next` | `build`: route table collapsed. `dev`: errors + ready line. |
 | **playwright** | `playwright` | Failing test names + error messages; passing tests dropped. Injects `--reporter=list`. |
@@ -194,14 +194,14 @@ ccr proxy git status                  # run raw (no filtering), record analytics
 | **nx** | `nx`, `npx nx` | Passing tasks collapsed to `[N tasks passed]`; failing task output kept. |
 | **stylelint** | `stylelint` | Issues grouped by file, caps at 40 + `[+N more]`. |
 | **biome** | `biome` | Code context snippets stripped; keeps file:line, rule, message. |
-| **kubectl** | `kubectl`, `k` | Smart column selection, log anomaly scoring, describe key sections. |
+| **kubectl** | `kubectl`, `k` | `get pods`: aggregates to `[N pods, all running]` or problem-pods table with counts. Smart column selection, log anomaly scoring, describe key sections. |
 | **terraform** | `terraform`, `tofu` | `plan`: `+`/`-`/`~` + summary. `validate`: short-circuits on success. |
 | **aws** | `aws`, `gcloud`, `az` | Resource extraction; `--output json` injected for read-only actions. |
 | **gh** | `gh` | Compact tables for list commands; strips HTML from `pr view`. |
 | **helm** | `helm` | `list`: compact table. `status`/`diff`/`template`: structured. |
-| **docker** | `docker` | `logs`: ANSI strip + BERT. `ps`/`images`: formatted tables. |
+| **docker** | `docker` | `logs`: ANSI strip + BERT. `ps`/`images`: formatted tables + total size. |
 | **make** | `make`, `ninja` | "Nothing to be done" short-circuit; keeps errors. Injects `--no-print-directory`. |
-| **golangci-lint** | `golangci-lint` | Diagnostics grouped by file; runner noise dropped. |
+| **golangci-lint** | `golangci-lint` | Diagnostics grouped by file; runner noise dropped. Detects v1 text and v2 JSON formats. |
 | **prisma** | `prisma` | `generate`/`migrate`/`db push` structured summaries. |
 | **mvn** | `mvn` | Drops `[INFO]` noise; keeps errors + reactor summary. |
 | **gradle** | `gradle` | UP-TO-DATE tasks collapsed; FAILED tasks and errors kept. |
@@ -209,7 +209,7 @@ ccr proxy git status                  # run raw (no filtering), record analytics
 | **pnpm** | `pnpm` | `install`: summary; drops progress bars. |
 | **brew** | `brew` | `install`/`update`: status lines + Caveats. |
 | **curl** | `curl` | JSON → type schema. Non-JSON: cap 30 lines. |
-| **grep / rg** | `grep`, `rg` | Compact paths, per-file 25-match cap. Injects `--no-heading --with-filename`. |
+| **grep / rg** | `grep`, `rg` | Compact paths, per-file 100-match cap, line numbers preserved, `[N matches in M files]` summary. Injects `--no-heading --with-filename`. Match-centered line truncation. |
 | **find** | `find` | Groups by directory, caps at 50. Injects `-maxdepth 8` if unset. |
 | **journalctl** | `journalctl` | Injects `--no-pager -n 200`. BERT anomaly scoring. |
 | **psql** | `psql` | Strips borders, caps at 20 rows. |
@@ -219,6 +219,8 @@ ccr proxy git status                  # run raw (no filtering), record analytics
 | **env** | `env` | Categorized sections; sensitive values redacted. |
 | **ls** | `ls` | Drops noise dirs; top-3 extension summary. |
 | **log** | `log` | Timestamp/UUID normalization, dedup `[×N]`, error summary block. |
+| **rsync** | `rsync` | Drops per-file transfer progress lines (`to-chk=`, `MB/s`); keeps file list and final summary. |
+| **ffmpeg** | `ffmpeg`, `ffprobe` | Drops `frame=` and `size=` real-time progress lines; keeps input/output codec info and final size line. |
 | **wget** | `wget` | Injects `--quiet` if no verbosity flag set. |
 
 </details>

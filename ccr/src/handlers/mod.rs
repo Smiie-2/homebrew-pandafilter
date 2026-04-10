@@ -53,6 +53,8 @@ pub mod tsc;
 pub mod util;
 pub mod vitest;
 pub mod wget;
+pub mod rsync;
+pub mod ffmpeg;
 
 /// A specialized handler for a known command.
 /// Handlers may inject extra flags (`rewrite_args`) and compact the output (`filter`).
@@ -151,6 +153,9 @@ fn get_handler_exact(cmd: &str) -> Option<Box<dyn Handler>> {
         "rake" => Some(Box::new(rake::RakeHandler)),
         // Network utilities
         "wget" => Some(Box::new(wget::WgetHandler)),
+        // File transfer / media
+        "rsync" => Some(Box::new(rsync::RsyncHandler)),
+        "ffmpeg" | "ffprobe" => Some(Box::new(ffmpeg::FfmpegHandler)),
         _ => None,
     }
 }

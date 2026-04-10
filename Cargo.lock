@@ -351,7 +351,7 @@ dependencies = [
 
 [[package]]
 name = "ccr"
-version = "0.6.8"
+version = "0.6.10"
 dependencies = [
  "anyhow",
  "assert_cmd",
@@ -394,6 +394,7 @@ name = "ccr-eval"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "ccr",
  "ccr-core",
  "ccr-sdk",
  "reqwest",

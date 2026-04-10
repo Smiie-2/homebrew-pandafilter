@@ -1,0 +1,21 @@
+command_hint = "python"
+
+[[questions]]
+question = "What is the name of the Excel file being read?"
+key_facts = ["sales_report_q1_2024", "sales_report_q1_2024.xlsx"]
+
+[[questions]]
+question = "How many sheets does the workbook have?"
+key_facts = ["3", "three", "Q1 Sales", "Summary", "Charts"]
+
+[[questions]]
+question = "What are the column headers in the Q1 Sales sheet?"
+key_facts = ["Date", "Region", "Revenue", "Profit"]
+
+[[questions]]
+question = "How many data rows are in the Q1 Sales sheet?"
+key_facts = ["1501", "1502"]
+
+[[questions]]
+question = "What products appear in the data?"
+key_facts = ["Widget A", "Widget B", "Gadget Pro"]

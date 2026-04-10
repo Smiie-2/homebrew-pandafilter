@@ -1,0 +1,31 @@
+ffmpeg version 6.0 Copyright (c) 2000-2023 the FFmpeg developers
+  built with Apple clang version 14.0.3
+  configuration: --prefix=/opt/homebrew/Cellar/ffmpeg/6.0
+  libavcodec     60. 3.100 / 60. 3.100
+Input #0, mov,mp4,m4a,3gp,3g2,mj2, from 'lecture_recording.mp4':
+  Metadata:
+    creation_time   : 2024-03-15T09:00:00.000000Z
+    encoder         : Lavf60.3.100
+  Duration: 00:45:30.00, start: 0.000000, bitrate: 8192 kb/s
+    Stream #0:0(und): Video: h264 (High), yuv420p, 1920x1080, 7680 kb/s, 30 fps
+    Stream #0:1(und): Audio: aac, 44100 Hz, stereo, fltp, 320 kb/s
+Output #0, mp4, to 'lecture_compressed.mp4':
+  Metadata:
+    encoder         : Lavf60.3.100
+    Stream #0:0(und): Video: h264 (High), yuv420p(tv, bt709, progressive), 1280x720
+    Stream #0:1(und): Audio: aac, 44100 Hz, stereo, fltp, 128 kb/s
+Stream mapping:
+  Stream #0:0 -> #0:0 (h264 (native) -> h264 (libx264))
+  Stream #0:1 -> #0:1 (aac (native) -> aac (native))
+Press [q] to quit, [?] for help
+frame=  300 fps= 60 q=23.0 size=    8192kB time=00:00:10.00 bitrate=6710.9kbits/s speed=2x
+frame=  600 fps= 60 q=23.0 size=   16384kB time=00:00:20.00 bitrate=6710.9kbits/s speed=2x
+frame= 1200 fps= 60 q=23.0 size=   32768kB time=00:00:40.00 bitrate=6710.9kbits/s speed=2x
+frame= 3000 fps= 60 q=23.0 size=   81920kB time=00:01:40.00 bitrate=6710.9kbits/s speed=2x
+frame= 6000 fps= 60 q=23.0 size=  163840kB time=00:03:20.00 bitrate=6710.9kbits/s speed=2x
+frame=18000 fps= 60 q=23.0 size=  491520kB time=00:10:00.00 bitrate=6710.9kbits/s speed=2x
+frame=36000 fps= 60 q=23.0 size=  983040kB time=00:20:00.00 bitrate=6710.9kbits/s speed=2x
+frame=54000 fps= 60 q=23.0 size= 1474560kB time=00:30:00.00 bitrate=6710.9kbits/s speed=2x
+frame=72000 fps= 60 q=23.0 size= 1966080kB time=00:40:00.00 bitrate=6710.9kbits/s speed=2x
+frame=81900 fps= 60 q=23.0 size= 2228224kB time=00:45:30.00 bitrate=6710.9kbits/s speed=2x
+video:2162688kB audio:43560kB subtitle:0kB other streams:0kB global headers:1kB muxing overhead: 0.003%

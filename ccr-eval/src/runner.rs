@@ -69,16 +69,34 @@ pub fn run_fixture(txt_path: &Path, qa_path: &Path, api_key: &str) -> Result<Fix
     let input = std::fs::read_to_string(txt_path)?;
     let qa: QaFixture = toml::from_str(&std::fs::read_to_string(qa_path)?)?;
 
-    // Run CCR pipeline
+    // Apply command handler filter first (same as the real ccr pipeline does at runtime)
+    let handler_output = if !qa.command_hint.is_empty() {
+        if let Some(h) = ccr::handlers::get_handler(&qa.command_hint) {
+            let fake_args = vec![qa.command_hint.clone()];
+            h.filter(&input, &fake_args)
+        } else {
+            input.clone()
+        }
+    } else {
+        input.clone()
+    };
+
+    // Run CCR pipeline on handler-filtered output; token savings measured vs original input
     let config: CcrConfig = toml::from_str(include_str!("../../config/default_filters.toml"))
         .unwrap_or_default();
     let pipeline = Pipeline::new(config);
     let hint = if qa.command_hint.is_empty() { None } else { Some(qa.command_hint.as_str()) };
-    let pipeline_result = pipeline.process(&input, hint, None, None)?;
+    let pipeline_result = pipeline.process(&handler_output, hint, None, None)?;
     let compressed = &pipeline_result.output;
 
     let lines_in = input.lines().count();
     let lines_out = compressed.lines().count();
+    // Re-measure savings against the original raw input (not handler output)
+    let input_tokens = ccr_core::tokens::count_tokens(&input);
+    let output_tokens = ccr_core::tokens::count_tokens(compressed);
+    let savings_pct = if input_tokens == 0 { 0.0 } else {
+        (input_tokens.saturating_sub(output_tokens)) as f32 / input_tokens as f32 * 100.0
+    };
 
     // Ask each question against both original and compressed
     let mut question_results = Vec::new();
@@ -111,9 +129,9 @@ pub fn run_fixture(txt_path: &Path, qa_path: &Path, api_key: &str) -> Result<Fix
 
     Ok(FixtureResult {
         name,
-        input_tokens: pipeline_result.analytics.input_tokens,
-        output_tokens: pipeline_result.analytics.output_tokens,
-        savings_pct: pipeline_result.analytics.savings_pct,
+        input_tokens,
+        output_tokens,
+        savings_pct,
         lines_in,
         lines_out,
         question_results,

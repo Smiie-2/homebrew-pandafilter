@@ -1,0 +1,21 @@
+command_hint = "rsync"
+
+[[questions]]
+question = "How many bytes were sent?"
+key_facts = ["544,072", "544072"]
+
+[[questions]]
+question = "What was the transfer speed?"
+key_facts = ["362,218", "362218", "bytes/sec"]
+
+[[questions]]
+question = "How many files were transferred?"
+key_facts = ["12", "twelve"]
+
+[[questions]]
+question = "Was the transfer successful or were there errors?"
+key_facts = ["successful", "success", "sent", "speedup"]
+
+[[questions]]
+question = "What is the name of the SQL migration file added?"
+key_facts = ["0043", "0044", "add_users_table", "add_indexes"]

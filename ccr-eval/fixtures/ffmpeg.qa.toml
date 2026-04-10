@@ -1,0 +1,21 @@
+command_hint = "ffmpeg"
+
+[[questions]]
+question = "What is the input video codec?"
+key_facts = ["h264", "H264", "H.264"]
+
+[[questions]]
+question = "What is the input video resolution?"
+key_facts = ["1920x1080", "1920 x 1080", "1080p"]
+
+[[questions]]
+question = "What is the duration of the input file?"
+key_facts = ["45:30", "00:45:30", "45 minutes"]
+
+[[questions]]
+question = "What is the output resolution?"
+key_facts = ["1280x720", "1280 x 720", "720p"]
+
+[[questions]]
+question = "How much video data was in the final output?"
+key_facts = ["2162688", "2162688kB", "video:"]

@@ -10,6 +10,7 @@ path = "src/main.rs"
 [dependencies]
 ccr-core = { path = "../ccr-core" }
 ccr-sdk  = { path = "../ccr-sdk" }
+ccr      = { path = "../ccr" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 toml = "0.8"

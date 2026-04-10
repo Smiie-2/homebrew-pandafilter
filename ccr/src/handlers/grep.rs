@@ -160,6 +160,8 @@ impl Handler for GrepHandler {
             ));
         }
 
+        out.push(format!("[{} matches in {} files]", total_matches, file_count));
+
         out.join("\n")
     }
 }
@@ -188,7 +190,7 @@ fn split_grep_line(line: &str) -> Option<(String, &str)> {
             if let Some((pos2, _)) = rest.match_indices(':').next() {
                 let maybe_num = &rest[..pos2];
                 if maybe_num.chars().all(|c| c.is_ascii_digit()) {
-                    return Some((candidate_file.to_string(), &rest[pos2 + 1..]));
+                    return Some((candidate_file.to_string(), rest)); // preserve "lineno:content"
                 }
             }
             return Some((candidate_file.to_string(), rest));
