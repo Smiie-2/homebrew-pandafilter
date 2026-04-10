@@ -104,6 +104,44 @@ fn maybe_migrate(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
+// ── Legacy ccr → panda DB migration ──────────────────────────────────────
+
+/// One-time migration: if the old `ccr/analytics.db` exists, copy all records
+/// into the new `panda/analytics.db` using INSERT OR IGNORE (safe for re-runs).
+fn maybe_migrate_from_ccr(conn: &Connection) -> Result<()> {
+    let Some(data_dir) = dirs::data_local_dir() else { return Ok(()) };
+    let old_db = data_dir.join("ccr").join("analytics.db");
+    if !old_db.exists() {
+        return Ok(());
+    }
+
+    // Attach the old DB and copy records, skipping any that already exist.
+    conn.execute_batch(&format!(
+        "ATTACH DATABASE '{}' AS old_ccr;",
+        old_db.to_string_lossy().replace('\'', "''")
+    ))?;
+
+    let migrated: usize = conn.execute(
+        "INSERT OR IGNORE INTO records
+            (timestamp_secs, command, subcommand, input_tokens, output_tokens,
+             savings_pct, duration_ms, cache_hit, agent, project_path)
+         SELECT timestamp_secs, command, subcommand, input_tokens, output_tokens,
+                savings_pct, duration_ms, cache_hit, agent, project_path
+         FROM old_ccr.records",
+        [],
+    )?;
+
+    conn.execute_batch("DETACH DATABASE old_ccr;")?;
+
+    if migrated > 0 {
+        // Rename old DB so we don't re-scan every time
+        let bak = old_db.with_extension("db.bak");
+        let _ = std::fs::rename(&old_db, &bak);
+    }
+
+    Ok(())
+}
+
 // ── Public API ────────────────────────────────────────────────────────────────
 
 /// Detect current project path: git toplevel → cwd fallback.
@@ -128,6 +166,7 @@ pub fn current_project_path() -> String {
 pub fn append(analytics: &Analytics, project_path: &str) -> Result<()> {
     let conn = open()?;
     maybe_migrate(&conn)?;
+    let _ = maybe_migrate_from_ccr(&conn);
 
     conn.execute(
         "INSERT INTO records (timestamp_secs, command, subcommand, input_tokens, output_tokens, savings_pct, duration_ms, cache_hit, agent, project_path) \
@@ -156,6 +195,7 @@ pub fn append(analytics: &Analytics, project_path: &str) -> Result<()> {
 pub fn load_all(project_path: Option<&str>) -> Result<Vec<Analytics>> {
     let conn = open()?;
     maybe_migrate(&conn)?;
+    let _ = maybe_migrate_from_ccr(&conn);
 
     let mut out = Vec::new();
 
