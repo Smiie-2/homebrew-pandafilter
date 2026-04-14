@@ -4,7 +4,7 @@
 
 <h1 align="center">PandaFilter</h1>
 
-<p align="center"><strong>Cut your AI agent's token bill by 60–95% — transparently, locally, automatically.</strong></p>
+<p align="center"><strong>Cut your AI agent's token bill by 60–95% — by compressing what it reads AND telling it what to read.</strong></p>
 
 <p align="center">
   Built by Assaf Petronio — building PandaFilter in public, with the open-source community.
@@ -49,7 +49,7 @@ curl -fsSL https://raw.githubusercontent.com/AssafWoo/homebrew-pandafilter/main/
 
 ## Why PandaFilter?
 
-AI coding agents are expensive to run — not because of what you ask them, but because of what they read back. Every `cargo build`, `git log`, or `npm install` dumps thousands of tokens of noise into the context window. I built PandaFilter to fix that transparently: it sits between your agent and your shell, compresses the output, and hands back only what the model needs. No config changes, no workflow changes — just less waste.
+AI coding agents are expensive to run — not because of what you ask them, but because of what they read back. Every `cargo build`, `git log`, or `npm install` dumps thousands of tokens of noise into the context window. I built PandaFilter to fix that in two ways. First, it sits between your agent and your shell, compresses the output, and hands back only what the model needs. But compression is only half the story — PandaFilter also builds a local file-relationship graph from your git history, so on every prompt it tells the agent which files matter and which to skip. Fewer wasted reads, fewer wasted tokens. No config changes, no workflow changes — just less waste.
 
 ---
 
@@ -59,6 +59,7 @@ AI coding agents are expensive to run — not because of what you ask them, but 
 - Filters build logs, test noise, and progress bars before the model ever sees them.
 - Uses BERT embeddings to match unknown commands to the closest handler — nothing falls through silently.
 - Caches repeated commands (git, kubectl, docker, terraform) so the model isn't re-reading stale output.
+- **Context Focusing (opt-in):** Builds a local file-relationship graph from git history and semantic embeddings. On every prompt, tells the agent which files to focus on and which to skip — preventing wasted reads before they happen. Enable with `panda focus --enable`.
 - Runs 100% locally — no data leaves your machine.
 
 ---
@@ -131,6 +132,20 @@ Numbers from `ccr/tests/handler_benchmarks.rs`. Run `cargo test -p panda benchma
 
 ---
 
+## Context Focusing savings (file recommendations)
+
+On top of output compression, PandaFilter tells the agent which files to focus on per prompt — preventing unnecessary reads before they happen.
+
+| Repo size | Unnecessary reads prevented | Estimated savings |
+|-----------|---------------------------|-------------------|
+| Small (< 25 files) | Skipped (auto-disabled) | — |
+| Medium (25–100 files) | 3–5 reads | 4,500–25,000 tokens |
+| Large (100+ files) | 5–10+ reads | 7,500–50,000 tokens |
+
+These savings stack on top of output compression — the agent reads fewer files, and the files it does read are compressed.
+
+---
+
 ## Commands
 
 **`panda init`** — wire PandaFilter into your agent's hooks:
@@ -154,6 +169,21 @@ panda gain --insight          # categorized savings + top saves
 ```
 
 **`panda doctor`** — diagnose the full installation in one command (run this first when something seems off).
+
+**`panda focus`** — manage Context Focusing (disabled by default — enable after testing):
+
+```bash
+panda focus --status             # show: enabled/disabled, index age, repo size
+panda focus --enable             # enable Context Focusing for this repo
+panda focus --disable            # disable (keeps index data)
+panda focus --dry-run            # preview what guidance would be injected
+```
+
+**`panda index`** — manually rebuild the file-relationship graph:
+
+```bash
+panda index                      # full/incremental build for current repo
+```
 
 **Other commands:**
 
@@ -290,6 +320,11 @@ mode = "aggressive"   # "aggressive" | "always" | "never"
 [read]
 mode = "auto"   # "passthrough" | "auto" | "strip" | "aggressive"
 
+[focus]
+enabled = false       # disabled by default — enable with `panda focus --enable` after testing
+min_files = 25        # skip for repos smaller than this
+min_lines = 2000      # skip for repos with fewer source lines
+
 [commands.git]
 patterns = [
   { regex = "^(Counting|Compressing|Receiving|Resolving) objects:.*", action = "Remove" },
@@ -359,6 +394,8 @@ All agents share the same binary and compression pipeline.
 
 **PostToolUse:** Bash → full pipeline; Read → BERT + session dedup; Glob → grouped by directory; Grep → compact paths.
 
+**UserPromptSubmit:** Context Focusing module → queries file graph → injects guidance (recommended + excluded files).
+
 **Hook integrity:** `panda init` writes SHA-256 baselines (chmod 0o444). PandaFilter verifies at every invocation and exits 1 with a warning if tampered. `panda verify` checks all installed agents.
 
 </details>
@@ -407,6 +444,9 @@ BERT semantic routing matches against all known handlers. If confidence is high 
 
 **How do I verify it's working?**
 `panda gain` after a session. To inspect what the model received from a specific command: `panda proxy git log --oneline -20`.
+
+**What is Context Focusing?**
+On every prompt, PandaFilter queries a local graph of your repo's files and git co-change history to tell the agent which files are relevant and which to avoid. This prevents the agent from wasting tokens reading unrelated files. Test it with `panda focus --enable` after verifying the index on your repo. Disable it with `panda focus --disable` if needed.
 
 **Does PandaFilter send any data outside my machine?**
 Never. All processing is fully local. BERT runs on-device.

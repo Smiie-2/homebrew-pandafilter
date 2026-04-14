@@ -516,6 +516,9 @@ fn process_read(hook_input: HookInput) -> Result<Option<String>> {
     let analytics = panda_core::analytics::Analytics::new(input_tokens, output_tokens, Some("(read)".to_string()), None, None);
     crate::util::append_analytics(&analytics);
 
+    // Record this read in the session for focus precision tracking
+    let _ = crate::analytics_db::record_session_read(&sid, &file_path, input_tokens);
+
     let hook_output = HookOutput { output: compressed };
     Ok(Some(serde_json::to_string(&hook_output)?))
 }

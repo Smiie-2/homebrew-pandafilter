@@ -2,6 +2,7 @@ pub mod analytics;
 pub mod ansi;
 pub mod global_rules;
 pub mod config;
+pub mod focus;
 pub mod jsonlog;
 pub mod ndjson;
 pub mod patterns;

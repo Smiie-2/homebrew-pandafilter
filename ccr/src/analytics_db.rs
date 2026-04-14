@@ -46,6 +46,27 @@ pub fn open() -> Result<Connection> {
             project_path    TEXT    NOT NULL DEFAULT ''
         );
         CREATE INDEX IF NOT EXISTS idx_project_ts ON records(project_path, timestamp_secs);
+
+        CREATE TABLE IF NOT EXISTS guidance_records (
+            id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp_secs      INTEGER NOT NULL,
+            session_id          TEXT NOT NULL,
+            files_recommended   INTEGER NOT NULL,
+            files_in_repo       INTEGER NOT NULL,
+            excluded_tokens_est INTEGER,
+            guidance_tokens     INTEGER,
+            project_path        TEXT NOT NULL DEFAULT ''
+        );
+        CREATE INDEX IF NOT EXISTS idx_guidance_session ON guidance_records(session_id, timestamp_secs);
+
+        CREATE TABLE IF NOT EXISTS session_reads (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_id      TEXT NOT NULL,
+            file_path       TEXT NOT NULL,
+            token_count     INTEGER NOT NULL,
+            timestamp_secs  INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_reads_session ON session_reads(session_id);
         "#,
     )?;
     Ok(conn)
@@ -267,6 +288,89 @@ fn now_secs() -> u64 {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0)
+}
+
+// ── Context Focusing guidance tracking ──────────────────────────────────────────
+
+/// Record a context focusing guidance event.
+pub fn record_guidance(
+    session_id: &str,
+    files_recommended: usize,
+    files_in_repo: usize,
+    excluded_tokens_est: Option<usize>,
+    guidance_tokens: Option<usize>,
+    project_path: &str,
+) -> Result<()> {
+    let conn = open()?;
+    conn.execute(
+        "INSERT INTO guidance_records (timestamp_secs, session_id, files_recommended, files_in_repo, excluded_tokens_est, guidance_tokens, project_path) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        params![
+            now_secs() as i64,
+            session_id,
+            files_recommended as i64,
+            files_in_repo as i64,
+            excluded_tokens_est.map(|t| t as i64),
+            guidance_tokens.map(|t| t as i64),
+            project_path,
+        ],
+    )?;
+    Ok(())
+}
+
+/// Record that a file was read in a session.
+pub fn record_session_read(session_id: &str, file_path: &str, token_count: usize) -> Result<()> {
+    let conn = open()?;
+    conn.execute(
+        "INSERT INTO session_reads (session_id, file_path, token_count, timestamp_secs) \
+         VALUES (?1, ?2, ?3, ?4)",
+        params![
+            session_id,
+            file_path,
+            token_count as i64,
+            now_secs() as i64,
+        ],
+    )?;
+    Ok(())
+}
+
+/// Get guidance records for a session.
+pub fn get_session_guidance(session_id: &str) -> Result<Vec<(usize, usize, Option<usize>)>> {
+    let conn = open()?;
+    let mut stmt = conn.prepare(
+        "SELECT files_recommended, files_in_repo, excluded_tokens_est FROM guidance_records WHERE session_id = ?1 ORDER BY timestamp_secs",
+    )?;
+    let rows = stmt.query_map(params![session_id], |row| {
+        let recommended: i64 = row.get(0)?;
+        let total: i64 = row.get(1)?;
+        let excluded: Option<i64> = row.get(2)?;
+        Ok((recommended as usize, total as usize, excluded.map(|e| e as usize)))
+    })?;
+
+    let mut results = Vec::new();
+    for row_result in rows {
+        results.push(row_result?);
+    }
+    Ok(results)
+}
+
+/// Get reads in a session.
+pub fn get_session_reads(session_id: &str) -> Result<Vec<(String, usize)>> {
+    let conn = open()?;
+    let mut stmt = conn.prepare(
+        "SELECT file_path, token_count FROM session_reads WHERE session_id = ?1",
+    )?;
+    let rows = stmt.query_map(params![session_id], |row| {
+        let path: String = row.get(0)?;
+        let tokens: i64 = row.get(1)?;
+        Ok((path, tokens as usize))
+    })?;
+
+    let mut results = Vec::new();
+    for row_result in rows {
+        results.push(row_result?);
+    }
+    Ok(results)
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────

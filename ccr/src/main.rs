@@ -40,6 +40,21 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
+    /// Manage Context Focusing (file-relationship graph for guided reads)
+    Focus {
+        /// Enable Context Focusing with hook registration and index build
+        #[arg(long)]
+        enable: bool,
+        /// Disable Context Focusing (keeps index data)
+        #[arg(long)]
+        disable: bool,
+        /// Show Context Focusing status
+        #[arg(long)]
+        status: bool,
+        /// Preview guidance without injecting it
+        #[arg(long)]
+        dry_run: bool,
+    },
     /// Filter stdin to reduce token count
     Filter {
         /// Command hint for selecting filter rules (e.g. cargo, git, npm)
@@ -66,6 +81,12 @@ enum Commands {
     /// PostToolUse hook mode for Claude Code (hidden)
     #[command(hide = true)]
     Hook,
+    /// Build the file-relationship graph index for Context Focusing
+    Index {
+        /// Repository path (default: current directory)
+        #[arg(long)]
+        repo: Option<String>,
+    },
     /// Install CCR hooks into Claude Code or Cursor
     Init {
         /// Remove CCR hooks and scripts instead of installing them
@@ -163,10 +184,14 @@ fn main() {
 
     let cli = Cli::parse();
     let result = match cli.command {
+        Commands::Focus { enable, disable, status, dry_run } => {
+            cmd::focus::run(cmd::focus::FocusArgs { enable, disable, status, dry_run })
+        }
         Commands::Filter { command } => cmd::filter::run(command),
         Commands::Gain { history, days, breakdown, insight } => cmd::gain::run(history, days, breakdown, insight),
         Commands::Doctor => cmd::doctor::run(),
         Commands::Hook => hook::run(),
+        Commands::Index { repo } => cmd::index::run(repo),
         Commands::Init { uninstall, agent } => match (uninstall, agent) {
             (true,  AgentTarget::Claude)  => uninstall_panda(),
             (true,  AgentTarget::Cursor)  => uninstall_cursor(),
