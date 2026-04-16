@@ -57,6 +57,16 @@ No config changes. No workflow changes. Runs 100% locally.
 
 ---
 
+## See it in action
+
+Run `panda gain` after a session to see your cumulative savings:
+
+<p align="center">
+  <img src="assets/Panda-gain-example.png" alt="panda gain output" width="700" />
+</p>
+
+---
+
 ## Token savings
 
 Numbers from `ccr/tests/handler_benchmarks.rs`. Run `panda gain` to see your own live data.
