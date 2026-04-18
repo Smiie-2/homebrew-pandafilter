@@ -1667,15 +1667,17 @@ fn process_webfetch(hook_input: HookInput) -> Result<Option<String>> {
     let in_tok = panda_core::tokens::count_tokens(&output_text);
     let out_tok = panda_core::tokens::count_tokens(&final_output);
 
-    // Build the compression notice so Claude knows it's reading a summary
-    // and has concrete instructions to recover any part of the full content.
-    let saved_pct = if in_tok > 0 {
-        100u64.saturating_sub(out_tok.min(in_tok) as u64 * 100 / in_tok as u64)
+    // Use raw-content token counts (before any notice is prepended) so the
+    // percentage reflects actual content reduction, not notice overhead.
+    let saved_pct = if in_tok > out_tok {
+        (in_tok - out_tok) * 100 / in_tok
     } else {
         0
     };
-    // Collect zoom IDs that appear in the output so Claude knows which blocks exist.
-    let zoom_ids: Vec<&str> = {
+
+    // Collect zoom IDs present in the output so Claude knows which collapsed
+    // sections are recoverable and by what ID.
+    let zoom_ids: Vec<String> = {
         let mut ids = Vec::new();
         let mut rest = final_output.as_str();
         while let Some(pos) = rest.find("ZI_") {
@@ -1683,12 +1685,21 @@ fn process_webfetch(hook_input: HookInput) -> Result<Option<String>> {
             let end = after
                 .find(|c: char| !c.is_alphanumeric() && c != '_')
                 .unwrap_or(after.len());
-            ids.push(&after[..end]);
+            ids.push(after[..end].to_string());
             rest = &after[end..];
         }
         ids.dedup();
         ids
     };
+
+    // Skip the notice when compression made no meaningful difference.
+    // Avoids confusing "~0% compressed" on pages where markers added bytes.
+    if saved_pct == 0 && zoom_ids.is_empty() {
+        crate::util::append_analytics(&panda_core::analytics::Analytics::new(
+            in_tok, out_tok, Some("(webfetch)".to_string()), None, None,
+        ));
+        return Ok(Some(serde_json::to_string(&HookOutput { output: final_output })?));
+    }
 
     let notice = if zoom_ids.is_empty() {
         format!(

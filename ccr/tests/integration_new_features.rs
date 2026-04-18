@@ -265,11 +265,13 @@ fn webfetch_prose_page_compresses_without_losing_structure() {
     assert!(out.status.success());
 
     if let Some(output) = parse_hook_output(&out.stdout) {
-        // Must include the PandaFilter notice so Claude knows it's reading a summary.
-        assert!(
-            output.contains("PandaFilter: WebFetch compressed"),
-            "prose compression must include the PandaFilter notice"
-        );
+        // When a PandaFilter notice IS present it must include a re-fetch instruction.
+        if output.contains("PandaFilter") {
+            assert!(
+                output.contains("re-fetch"),
+                "PandaFilter notice must include a re-fetch instruction"
+            );
+        }
         // Any omission marker must include a zoom ID — no dead ends.
         let collapsed_without_id = output.contains("[... ") && !output.contains("ZI_");
         assert!(
