@@ -31,6 +31,11 @@ pub struct SessionEntry {
     /// at record time. None on the first run or when BERT is skipped.
     #[serde(default)]
     pub centroid_delta: Option<f32>,
+    /// Compact serialised error signatures for this entry.
+    /// Used by error-loop detection to produce structural diffs across retries.
+    /// Format: one `code|file|message` key per line (from ErrorSet::to_storage).
+    #[serde(default)]
+    pub error_signatures: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Default)]
@@ -251,11 +256,30 @@ impl SessionState {
             content_preview,
             state_content,
             centroid_delta,
+            error_signatures: None,
         };
 
         self.entries.push(entry);
         if self.entries.len() > MAX_ENTRIES {
             self.entries.remove(0);
+        }
+    }
+
+    /// Find the most recent entry for `cmd` that has error signatures stored.
+    /// Returns `(turn, signatures_storage_str)` for use by error-loop detection.
+    pub fn find_error_loop(&self, cmd: &str) -> Option<(usize, &str)> {
+        self.entries
+            .iter()
+            .rev()
+            .find(|e| e.cmd == cmd && e.error_signatures.is_some())
+            .and_then(|e| e.error_signatures.as_deref().map(|s| (e.turn, s)))
+    }
+
+    /// Update the most recent entry for `cmd` with error signatures.
+    /// Called immediately after `record()` so the just-pushed entry is updated.
+    pub fn set_last_error_signatures(&mut self, cmd: &str, sigs: String) {
+        if let Some(entry) = self.entries.iter_mut().rev().find(|e| e.cmd == cmd) {
+            entry.error_signatures = Some(sigs);
         }
     }
 

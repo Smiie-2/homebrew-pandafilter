@@ -19,6 +19,7 @@ mod agents;
 mod analytics_db;
 mod bert_budget;
 mod cmd;
+mod error_signatures;
 mod config_loader;
 mod handlers;
 mod hook;

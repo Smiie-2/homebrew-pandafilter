@@ -288,6 +288,28 @@ fn process_bash(hook_input: HookInput) -> Result<Option<String>> {
     result.output = enrich_zoom_labels(&result.output, &result.zoom_blocks);
     let _ = crate::zoom_store::save_blocks(&sid, result.zoom_blocks);
 
+    // ── Error-loop detection ──────────────────────────────────────────────────
+    // Parse error signatures from pipeline output BEFORE any session-aware passes.
+    // Stored early so they reflect the actual errors, not compressed summaries.
+    let current_error_set = crate::error_signatures::ErrorSet::from_output(&result.output);
+
+    // If the same command has produced overlapping errors before, replace output
+    // with a structural diff (fixed / new / unchanged). Falls through to C3 when:
+    //   - no errors in output
+    //   - no prior run with errors for this command
+    //   - all current errors are new (first encounter of this error set)
+    if let Some(loop_output) = crate::error_signatures::apply_error_loop_detection(
+        &result.output,
+        &cmd_key,
+        &session,
+    ) {
+        let errloop_blocks = panda_core::zoom::drain();
+        if !errloop_blocks.is_empty() {
+            let _ = crate::zoom_store::save_blocks(&sid, errloop_blocks);
+        }
+        result.output = loop_output;
+    }
+
     // ── Session-aware passes ──────────────────────────────────────────────────
     // Skip BERT-based passes for short outputs: semantic compression and dedup
     // add latency without meaningful benefit when there are few lines to work with.
@@ -365,6 +387,10 @@ fn process_bash(hook_input: HookInput) -> Result<Option<String>> {
                 .map(|hist| crate::handlers::util::cosine_similarity(hist, &new_centroid));
             session.update_command_centroid(&cmd_key, new_centroid);
             session.record(&cmd_key, emb, tokens, &final_output, is_state, centroid_delta);
+            // Store error signatures so the next run can detect a loop.
+            if !current_error_set.is_empty() {
+                session.set_last_error_signatures(&cmd_key, current_error_set.to_storage());
+            }
             session.save(&sid);
         }
     }
@@ -837,6 +863,7 @@ fn process_glob(hook_input: HookInput) -> Result<Option<String>> {
                     content_preview: preview,
                     state_content: None,
                     centroid_delta: None,
+                    error_signatures: None,
                 });
                 session.total_turns += 1;
                 session.total_tokens += tokens;
