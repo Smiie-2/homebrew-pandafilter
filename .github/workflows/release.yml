@@ -153,14 +153,6 @@ jobs:
           mkdir bundle
           cp "${{ matrix.asset_name }}" bundle/panda
           cp "$DYLIB" bundle/
-          # Compatibility shim so old `ccr` hooks keep working with a deprecation notice
-          printf '%s\n' \
-            '#!/usr/bin/env bash' \
-            'echo "WARNING: ccr has been renamed to panda in v0.6.12." >&2' \
-            'echo "   Update your hooks: panda init" >&2' \
-            'echo "" >&2' \
-            'exec "$(dirname "$0")/panda" "$@"' > bundle/ccr
-          chmod +x bundle/ccr
           tar -czf "${{ matrix.asset_name }}.tar.gz" -C bundle .
 
           echo "Bundle contents:"

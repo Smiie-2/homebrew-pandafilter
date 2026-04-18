@@ -27,8 +27,6 @@ class Pandafilter < Formula
       system "install_name_tool", "-add_rpath", lib.to_s, "#{bin}/panda"
     end
 
-    # Compatibility shim bundled in the tarball — install it so old `ccr` hooks keep working
-    bin.install "ccr"
   end
 
   def post_install
