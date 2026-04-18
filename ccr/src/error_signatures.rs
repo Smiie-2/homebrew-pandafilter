@@ -300,7 +300,17 @@ fn parse_generic_error(line: &str) -> Option<ErrorSignature> {
         Regex::new(r"(?i)^(?:error|FAILED|fatal|FATAL):\s+(.{10,})$").unwrap()
     });
 
-    let caps = re.captures(line.trim())?;
+    let trimmed = line.trim();
+    // Skip summary/aggregation lines — these vary by count and produce false
+    // "unchanged" matches across runs where errors actually changed.
+    if trimmed.to_lowercase().contains("aborting due to")
+        || trimmed.to_lowercase().contains("previous error")
+        || trimmed.to_lowercase().contains("could not compile")
+    {
+        return None;
+    }
+
+    let caps = re.captures(trimmed)?;
     Some(ErrorSignature {
         code: None,
         file: None,
