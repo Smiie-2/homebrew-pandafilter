@@ -1371,6 +1371,26 @@ pub fn compute_output_centroid(text: &str) -> anyhow::Result<Vec<f32>> {
     Ok(centroid)
 }
 
+/// Compute a normalized mean centroid from pre-computed L2-normalized embeddings.
+/// Returns a 384-dim zero vector when the slice is empty.
+/// Avoids a redundant embed_batch call when embeddings are already available.
+pub fn compute_centroid_from_embeddings(embeddings: &[Vec<f32>]) -> Vec<f32> {
+    if embeddings.is_empty() {
+        return vec![0.0f32; 384];
+    }
+    let dim = embeddings[0].len();
+    let mut centroid = vec![0.0f32; dim];
+    for emb in embeddings {
+        for (c, v) in centroid.iter_mut().zip(emb.iter()) {
+            *c += v;
+        }
+    }
+    let n = embeddings.len() as f32;
+    centroid.iter_mut().for_each(|c| *c /= n);
+    l2_normalize(&mut centroid);
+    centroid
+}
+
 /// Compute semantic similarity between two texts. Used as a quality gate on generative output.
 pub fn semantic_similarity(a: &str, b: &str) -> anyhow::Result<f32> {
     let model = get_model()?;
@@ -1535,5 +1555,42 @@ mod tests {
         let c = compute_centroid(&embeddings);
         let norm: f32 = c.iter().map(|x| x * x).sum::<f32>().sqrt();
         assert!((norm - 1.0).abs() < 1e-5, "centroid norm was {}", norm);
+    }
+
+    #[test]
+    fn compute_centroid_from_embeddings_empty_returns_zero_vector() {
+        let result = compute_centroid_from_embeddings(&[]);
+        assert_eq!(result.len(), 384);
+        assert!(result.iter().all(|&x| x == 0.0));
+    }
+
+    #[test]
+    fn compute_centroid_from_embeddings_single_is_normalized() {
+        // A non-normalized vector should come back as a unit vector.
+        let raw = vec![3.0f32, 4.0f32];
+        // Pad to 384 dims with zero to simulate an actual embedding.
+        let mut v = vec![0.0f32; 384];
+        v[0] = 3.0;
+        v[1] = 4.0;
+        let result = compute_centroid_from_embeddings(&[v]);
+        let norm: f32 = result.iter().map(|x| x * x).sum::<f32>().sqrt();
+        assert!((norm - 1.0).abs() < 1e-5, "norm was {}", norm);
+        // Direction should be preserved: ratio of first two components should be 3:4
+        assert!((result[0] / result[1] - 3.0 / 4.0).abs() < 1e-5);
+    }
+
+    #[test]
+    fn compute_centroid_from_embeddings_matches_compute_output_centroid() {
+        // For a short, known input: both functions should produce the same centroid.
+        let text = "hello world\nfoo bar baz\nrust is great";
+        let lines: Vec<&str> = text.lines().filter(|l| !l.trim().is_empty()).collect();
+        let embeddings = embed_batch(&lines).expect("embed_batch failed");
+        let from_pre = compute_centroid_from_embeddings(&embeddings);
+        let from_text = compute_output_centroid(text)
+            .expect("compute_output_centroid failed");
+        // Should be numerically identical (both take the mean of per-line embeddings).
+        for (a, b) in from_pre.iter().zip(from_text.iter()) {
+            assert!((a - b).abs() < 1e-5, "mismatch at dim: {} vs {}", a, b);
+        }
     }
 }

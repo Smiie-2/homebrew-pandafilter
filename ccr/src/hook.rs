@@ -34,6 +34,7 @@ struct HookOutput {
 /// Does NOT attempt the daemon socket — call this directly from the daemon
 /// server and from the fallback path in `run()`.
 pub fn process(input: &str) -> Result<Option<String>> {
+    crate::bert_budget::reset();
     let hook_input: HookInput = match serde_json::from_str(input) {
         Ok(v) => v,
         Err(_) => return Ok(None),
@@ -211,7 +212,7 @@ fn process_bash(hook_input: HookInput) -> Result<Option<String>> {
     // timestamp-stripped version of the output and check similarity at a
     // lower threshold (0.80 vs 0.92).  Catches polling loops where only
     // clocks/counters/UUIDs differ between otherwise identical responses.
-    if session.has_recent_entry(&cmd_key, 120) {
+    if session.has_recent_entry(&cmd_key, 120) && crate::bert_budget::try_consume() {
         let normalized = strip_temporal_noise(&output_text);
         if let Ok(mut embs) = panda_core::summarizer::embed_batch(&[normalized.as_str()]) {
             if let Some(emb) = embs.pop() {
@@ -293,7 +294,7 @@ fn process_bash(hook_input: HookInput) -> Result<Option<String>> {
     const BERT_MIN_LINES: usize = 15;
     let pipeline_line_count = result.output.lines().count();
 
-    let pipeline_emb = if pipeline_line_count >= BERT_MIN_LINES {
+    let pipeline_emb = if pipeline_line_count >= BERT_MIN_LINES && crate::bert_budget::try_consume() {
         panda_core::summarizer::embed_batch(&[result.output.as_str()])
             .ok()
             .and_then(|mut v| v.pop())
@@ -347,22 +348,24 @@ fn process_bash(hook_input: HookInput) -> Result<Option<String>> {
         after_xdedup
     };
 
-    if pipeline_line_count >= BERT_MIN_LINES {
-        if let Ok(mut embeddings) = panda_core::summarizer::embed_batch(&[final_output.as_str()]) {
-            if let Some(emb) = embeddings.pop() {
-                let tokens = panda_core::tokens::count_tokens(&final_output);
-                // Compute centroid_delta: cosine similarity of new centroid vs historical.
-                // Stored on the entry so the NEXT invocation can derive stability pressure.
-                let new_centroid = panda_core::summarizer::compute_output_centroid(&final_output)
-                    .ok()
-                    .unwrap_or_else(|| emb.clone());
-                let centroid_delta = historical_centroid
-                    .as_ref()
-                    .map(|hist| crate::handlers::util::cosine_similarity(hist, &new_centroid));
-                session.update_command_centroid(&cmd_key, new_centroid);
-                session.record(&cmd_key, emb, tokens, &final_output, is_state, centroid_delta);
-                session.save(&sid);
-            }
+    if pipeline_line_count >= BERT_MIN_LINES && crate::bert_budget::try_consume() {
+        let non_empty: Vec<&str> = final_output
+            .lines()
+            .filter(|l| !l.trim().is_empty())
+            .collect();
+        if let Ok(line_embeddings) = panda_core::summarizer::embed_batch(&non_empty) {
+            let tokens = panda_core::tokens::count_tokens(&final_output);
+            // Per-line centroid is higher quality than single-string embed.
+            // Reuse it as the whole-output embedding for delta tracking (saves 1 BERT call).
+            let new_centroid =
+                panda_core::summarizer::compute_centroid_from_embeddings(&line_embeddings);
+            let emb = new_centroid.clone();
+            let centroid_delta = historical_centroid
+                .as_ref()
+                .map(|hist| crate::handlers::util::cosine_similarity(hist, &new_centroid));
+            session.update_command_centroid(&cmd_key, new_centroid);
+            session.record(&cmd_key, emb, tokens, &final_output, is_state, centroid_delta);
+            session.save(&sid);
         }
     }
 
@@ -578,13 +581,15 @@ fn process_read(hook_input: HookInput) -> Result<Option<String>> {
             let zoom_blocks = panda_core::zoom::drain();
             let _ = crate::zoom_store::save_blocks(&sid, zoom_blocks);
 
-            if let Ok(mut embs) =
-                panda_core::summarizer::embed_batch(&[focus_output.as_str()])
-            {
-                if let Some(emb) = embs.pop() {
-                    let tokens = panda_core::tokens::count_tokens(&focus_output);
-                    session.record(&file_path, emb, tokens, &focus_output, false, None);
-                    session.save(&sid);
+            if crate::bert_budget::try_consume() {
+                if let Ok(mut embs) =
+                    panda_core::summarizer::embed_batch(&[focus_output.as_str()])
+                {
+                    if let Some(emb) = embs.pop() {
+                        let tokens = panda_core::tokens::count_tokens(&focus_output);
+                        session.record(&file_path, emb, tokens, &focus_output, false, None);
+                        session.save(&sid);
+                    }
                 }
             }
 
@@ -640,22 +645,26 @@ fn process_read(hook_input: HookInput) -> Result<Option<String>> {
 
     // Session dedup using file_path as cmd_key.
     // Threshold scales by file size — see `read_dedup_threshold()`.
-    let compressed = if let Ok(mut embs) =
-        panda_core::summarizer::embed_batch(&[pipeline_output.as_str()])
-    {
-        if let Some(emb) = embs.pop() {
-            let tokens = panda_core::tokens::count_tokens(&pipeline_output);
-            let line_count = pipeline_output.lines().count();
-            let threshold = read_dedup_threshold(line_count);
-            if let Some(hit) = session.find_similar_with_threshold(&file_path, &emb, threshold) {
-                let age = crate::session::format_age(hit.age_secs);
-                format!(
-                    "[same file content as turn {} ({} ago) — {} tokens saved]",
-                    hit.turn, age, hit.tokens_saved
-                )
+    let compressed = if crate::bert_budget::try_consume() {
+        if let Ok(mut embs) =
+            panda_core::summarizer::embed_batch(&[pipeline_output.as_str()])
+        {
+            if let Some(emb) = embs.pop() {
+                let tokens = panda_core::tokens::count_tokens(&pipeline_output);
+                let line_count = pipeline_output.lines().count();
+                let threshold = read_dedup_threshold(line_count);
+                if let Some(hit) = session.find_similar_with_threshold(&file_path, &emb, threshold) {
+                    let age = crate::session::format_age(hit.age_secs);
+                    format!(
+                        "[same file content as turn {} ({} ago) — {} tokens saved]",
+                        hit.turn, age, hit.tokens_saved
+                    )
+                } else {
+                    session.record(&file_path, emb, tokens, &pipeline_output, false, None);
+                    session.save(&sid);
+                    pipeline_output
+                }
             } else {
-                session.record(&file_path, emb, tokens, &pipeline_output, false, None);
-                session.save(&sid);
                 pipeline_output
             }
         } else {
@@ -816,24 +825,26 @@ fn process_glob(hook_input: HookInput) -> Result<Option<String>> {
     // Record in session (use hash prefix as content_preview for dedup)
     let tokens = panda_core::tokens::count_tokens(&compressed);
     let preview = format!("{} {}", list_hash, &compressed[..compressed.len().min(3900)]);
-    if let Ok(mut embs) = panda_core::summarizer::embed_batch(&[compressed.as_str()]) {
-        if let Some(emb) = embs.pop() {
-            session.entries.push(crate::session::SessionEntry {
-                turn: session.total_turns + 1,
-                cmd: cmd_key,
-                ts: now_secs(),
-                tokens,
-                embedding: emb,
-                content_preview: preview,
-                state_content: None,
-                centroid_delta: None,
-            });
-            session.total_turns += 1;
-            session.total_tokens += tokens;
-            if session.entries.len() > 30 {
-                session.entries.remove(0);
+    if crate::bert_budget::try_consume() {
+        if let Ok(mut embs) = panda_core::summarizer::embed_batch(&[compressed.as_str()]) {
+            if let Some(emb) = embs.pop() {
+                session.entries.push(crate::session::SessionEntry {
+                    turn: session.total_turns + 1,
+                    cmd: cmd_key,
+                    ts: now_secs(),
+                    tokens,
+                    embedding: emb,
+                    content_preview: preview,
+                    state_content: None,
+                    centroid_delta: None,
+                });
+                session.total_turns += 1;
+                session.total_tokens += tokens;
+                if session.entries.len() > 30 {
+                    session.entries.remove(0);
+                }
+                session.save(&sid);
             }
-            session.save(&sid);
         }
     }
 
@@ -961,6 +972,27 @@ fn is_no_output_cmd(cmd: &str) -> bool {
 
 // ── Fix 2: timestamp/counter normalization for polling dedup ─────────────────
 
+/// Fallback used when the BERT budget is exhausted for a given call site.
+/// Returns the first HEAD lines and last TAIL lines joined with an omission marker.
+/// Never calls BERT. Never panics. Used by the WebFetch handler and future features.
+#[allow(dead_code)]
+fn bert_budget_fallback(text: &str) -> String {
+    const HEAD: usize = 40;
+    const TAIL: usize = 20;
+    let lines: Vec<&str> = text.lines().collect();
+    let n = lines.len();
+    if n <= HEAD + TAIL {
+        return text.to_string();
+    }
+    let omitted = n - HEAD - TAIL;
+    format!(
+        "{}\n[... {} lines omitted — BERT budget exhausted ...]\n{}",
+        lines[..HEAD].join("\n"),
+        omitted,
+        lines[n - TAIL..].join("\n")
+    )
+}
+
 /// Strip temporal noise (timestamps, counters, UUIDs, git SHAs, IPs) from
 /// `text` before computing the embedding for polling suppressor B3 comparison.
 /// The output itself is never modified — only the embedding input is normalized.
@@ -1012,6 +1044,9 @@ fn apply_cross_file_dedup(
     }
 
     let texts: Vec<&str> = sections.iter().map(|s| s.as_str()).collect();
+    if !crate::bert_budget::try_consume() {
+        return output.to_string();
+    }
     let embeddings = match panda_core::summarizer::embed_batch(&texts) {
         Ok(e) => e,
         Err(_) => {
@@ -1099,9 +1134,11 @@ fn store_section_embeddings(
         return;
     }
     let texts: Vec<&str> = sections.iter().map(|s| s.as_str()).collect();
-    if let Ok(embeddings) = panda_core::summarizer::embed_batch(&texts) {
-        session.add_read_section_embeddings(embeddings);
-        session.save(sid);
+    if crate::bert_budget::try_consume() {
+        if let Ok(embeddings) = panda_core::summarizer::embed_batch(&texts) {
+            session.add_read_section_embeddings(embeddings);
+            session.save(sid);
+        }
     }
 }
 
@@ -1209,6 +1246,9 @@ fn refresh_focus_embedding(file_path: &str) {
     };
     let content_prefix: String = content.chars().take(1000).collect();
     let embed_text = format!("{}\n{}", rel_path, content_prefix);
+    if !crate::bert_budget::try_consume() {
+        return;
+    }
     let embeddings = match panda_core::summarizer::embed_batch(&[embed_text.as_str()]) {
         Ok(e) => e,
         Err(_) => return,
@@ -1446,6 +1486,9 @@ fn cross_command_dedup(
         .chain(prior_segments.iter().map(|(_, s)| s.as_str()))
         .collect();
 
+    if !crate::bert_budget::try_consume() {
+        return output.to_string();
+    }
     let embeddings = match panda_core::summarizer::embed_batch(&all_texts) {
         Ok(e) => e,
         Err(_) => return output.to_string(),

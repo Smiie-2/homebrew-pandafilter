@@ -17,6 +17,7 @@ enum AgentTarget {
 
 mod agents;
 mod analytics_db;
+mod bert_budget;
 mod cmd;
 mod config_loader;
 mod handlers;
