@@ -41,7 +41,7 @@ pub fn assemble(
     let negative_guidance = build_negative_guidance(&recommended_files);
 
     // Format as human-readable text
-    let guidance_text = format_guidance(&recommended_files, total_files);
+    let guidance_text = format_guidance(&recommended_files);
 
     GuidanceOutput {
         recommended_files,
@@ -61,7 +61,7 @@ fn build_negative_guidance(_recommended: &[FileEntry]) -> Vec<String> {
 }
 
 /// Format guidance as human-readable text for injection into context.
-fn format_guidance(recommended: &[FileEntry], total_files: usize) -> String {
+fn format_guidance(recommended: &[FileEntry]) -> String {
     if recommended.is_empty() {
         return "## Context Focus\nNo specific files identified as most relevant.".to_string();
     }
@@ -96,7 +96,7 @@ mod tests {
 
     #[test]
     fn test_format_guidance_empty() {
-        let text = format_guidance(&[], 50);
+        let text = format_guidance(&[]);
         assert!(text.contains("No specific files"));
     }
 
@@ -115,7 +115,7 @@ mod tests {
             },
         ];
 
-        let text = format_guidance(&files, 50);
+        let text = format_guidance(&files);
         assert!(text.contains("src/main.rs"));
         assert!(text.contains("Entry Point"));
         assert!(text.contains("src/db.rs"));
