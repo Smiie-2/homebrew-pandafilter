@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, createContext, useContext } from 'react'
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
   PieChart, Pie, Cell, ResponsiveContainer,
@@ -24,6 +24,10 @@ const T = {
   indigo:     '#6366f1',
   link:       '#38bdf8',
 }
+
+// ─── Mobile context ───────────────────────────────────────────────────────────
+const MobileCtx = createContext(false)
+function useIsMobile() { return useContext(MobileCtx) }
 
 // ─── Data ─────────────────────────────────────────────────────────────────────
 const tokenTable = [
@@ -256,9 +260,11 @@ function Callout({ type = 'tip', children }: { type?: 'tip' | 'note' | 'warning'
 }
 
 function StatRow({ items }: { items: { value: string; label: string; color?: string }[] }) {
+  const isMobile = useIsMobile()
+  const cols = isMobile ? 2 : items.length
   return (
     <div style={{
-      display: 'grid', gridTemplateColumns: `repeat(${items.length}, 1fr)`,
+      display: 'grid', gridTemplateColumns: `repeat(${cols}, 1fr)`,
       gap: 1, background: T.border, borderRadius: 10, overflow: 'hidden',
       marginBottom: 28,
     }}>
@@ -280,9 +286,9 @@ function DataTable({ headers, rows, highlight }: {
   return (
     <div style={{
       background: T.card, border: `1px solid ${T.border}`, borderRadius: 10,
-      overflow: 'hidden', marginBottom: 28,
+      overflow: 'auto', marginBottom: 28,
     }}>
-      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+      <table style={{ width: '100%', minWidth: 480, borderCollapse: 'collapse', fontSize: 13 }}>
         <thead>
           <tr style={{ background: T.sidebar }}>
             {headers.map((h, i) => (
@@ -533,6 +539,7 @@ panda gain            # see token savings from this session
 }
 
 function SectionAgents() {
+  const isMobile = useIsMobile()
   const agents = [
     {
       name: 'Claude Code',
@@ -605,7 +612,7 @@ function SectionAgents() {
         verifies the installation automatically.
       </P>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 28 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: 12, marginBottom: 28 }}>
         {agents.map(({ name, cmd, color, config, script, desc, logo }) => (
           <div key={name} style={{
             background: T.card, border: `1px solid ${T.border}`, borderRadius: 10,
@@ -717,6 +724,7 @@ function SectionPipeline() {
 }
 
 function SectionBert() {
+  const isMobile = useIsMobile()
   const useCases = [
     {
       role: 'Output summarization',
@@ -752,7 +760,7 @@ function SectionBert() {
 
       <H3>Model</H3>
       <div style={{
-        display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 1,
+        display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: 1,
         background: T.border, borderRadius: 10, overflow: 'hidden', marginBottom: 24,
       }}>
         {[
@@ -837,7 +845,7 @@ function SectionBert() {
       </P>
 
       <div style={{
-        display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 20,
+        display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: 16, marginBottom: 20,
       }}>
         {[
           {
@@ -888,16 +896,16 @@ function SectionBert() {
             { range: '0.10 ≤ entropy ≤ 0.35',   budget: 'Linear interpolation', label: 'Mixed content',            color: T.amber  },
             { range: 'entropy > 0.35',           budget: '100% of max budget',   label: 'Diverse / rich output',    color: T.emerald },
           ].map(({ range, budget, label, color }) => (
-            <div key={range} style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-              <code style={{ width: 200, flexShrink: 0, fontSize: 12, color, fontFamily: 'JetBrains Mono, monospace' }}>{range}</code>
-              <div style={{ flex: 1, height: 6, background: T.border, borderRadius: 3, overflow: 'hidden' }}>
+            <div key={range} style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: isMobile ? 8 : 16 }}>
+              <code style={{ width: isMobile ? '100%' : 200, flexShrink: 0, fontSize: 12, color, fontFamily: 'JetBrains Mono, monospace' }}>{range}</code>
+              <div style={{ flex: 1, minWidth: 60, height: 6, background: T.border, borderRadius: 3, overflow: 'hidden' }}>
                 <div style={{
                   height: '100%', borderRadius: 3, background: color,
                   width: color === T.red ? '5%' : color === T.amber ? '50%' : '100%',
                 }} />
               </div>
-              <span style={{ fontSize: 12.5, color: T.sub, width: 160, flexShrink: 0 }}>{budget}</span>
-              <span style={{ fontSize: 12, color: T.muted }}>{label}</span>
+              <span style={{ fontSize: 12.5, color: T.sub, width: isMobile ? 'auto' : 160, flexShrink: 0 }}>{budget}</span>
+              {!isMobile && <span style={{ fontSize: 12, color: T.muted }}>{label}</span>}
             </div>
           ))}
         </div>
@@ -1734,8 +1742,17 @@ export default function App() {
   const [query, setQuery] = useState('')
   const [searchFocused, setSearchFocused] = useState(false)
   const [selectedIdx, setSelectedIdx] = useState(0)
+  const [isMobile, setIsMobile] = useState(false)
+  const [sidebarOpen, setSidebarOpen] = useState(false)
   const searchRef = useRef<HTMLInputElement>(null)
   const contentRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    const check = () => setIsMobile(window.innerWidth < 768)
+    check()
+    window.addEventListener('resize', check)
+    return () => window.removeEventListener('resize', check)
+  }, [])
 
   const results = query.trim().length > 0
     ? SEARCH_INDEX.filter(item => {
@@ -1751,6 +1768,7 @@ export default function App() {
   function goTo(id: string) {
     setQuery('')
     setSearchFocused(false)
+    setSidebarOpen(false)
     document.getElementById(id)?.scrollIntoView({ behavior: 'smooth' })
   }
 
@@ -1771,6 +1789,7 @@ export default function App() {
   }, [])
 
   return (
+    <MobileCtx.Provider value={isMobile}>
     <div style={{ background: T.bg, color: T.text, minHeight: '100vh', fontFamily: 'Inter, system-ui, sans-serif' }}>
       {/* Top nav */}
       <nav style={{
@@ -1779,20 +1798,38 @@ export default function App() {
         padding: '0 28px', background: T.sidebar, borderBottom: `1px solid ${T.border}`,
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          {/* Hamburger — mobile only */}
+          {isMobile && (
+            <button
+              onClick={() => setSidebarOpen(o => !o)}
+              style={{
+                background: 'none', border: 'none', cursor: 'pointer',
+                color: T.sub, padding: '4px 6px', borderRadius: 6,
+                display: 'flex', flexDirection: 'column', gap: 4,
+              }}
+              aria-label="Toggle menu"
+            >
+              <span style={{ display: 'block', width: 18, height: 2, background: T.sub, borderRadius: 1 }} />
+              <span style={{ display: 'block', width: 18, height: 2, background: T.sub, borderRadius: 1 }} />
+              <span style={{ display: 'block', width: 18, height: 2, background: T.sub, borderRadius: 1 }} />
+            </button>
+          )}
           <img src={`${import.meta.env.BASE_URL}logo.png`} alt="PandaFilter" style={{ width: 32, height: 32, objectFit: 'contain' }} />
           <span style={{ fontWeight: 700, fontSize: 15, color: T.text }}>PandaFilter</span>
-          <span style={{
-            fontSize: 11, padding: '2px 8px', borderRadius: 999,
-            background: 'rgba(34,211,238,0.1)', color: T.cyan, border: `1px solid rgba(34,211,238,0.25)`,
-            marginLeft: 4,
-          }}>docs</span>
+          {!isMobile && (
+            <span style={{
+              fontSize: 11, padding: '2px 8px', borderRadius: 999,
+              background: 'rgba(34,211,238,0.1)', color: T.cyan, border: `1px solid rgba(34,211,238,0.25)`,
+              marginLeft: 4,
+            }}>docs</span>
+          )}
         </div>
-        <div style={{ display: 'flex', gap: 24, alignItems: 'center' }}>
+        <div style={{ display: 'flex', gap: isMobile ? 12 : 24, alignItems: 'center' }}>
           {[
             { label: 'GitHub',  href: 'https://github.com/AssafWoo/PandaFilter' },
             { label: 'Discord', href: 'https://discord.com/invite/FFQC3bxYQ'    },
           ].map(({ label, href }) => (
-            <a key={label} href={href} style={{ fontSize: 13.5, color: T.sub, textDecoration: 'none' }}
+            <a key={label} href={href} style={{ fontSize: isMobile ? 12 : 13.5, color: T.sub, textDecoration: 'none' }}
               onMouseEnter={e => (e.currentTarget.style.color = T.text)}
               onMouseLeave={e => (e.currentTarget.style.color = T.sub)}>
               {label}
@@ -1801,14 +1838,31 @@ export default function App() {
         </div>
       </nav>
 
+      {/* Mobile sidebar backdrop */}
+      {isMobile && sidebarOpen && (
+        <div
+          onClick={() => setSidebarOpen(false)}
+          style={{
+            position: 'fixed', inset: 0, zIndex: 149,
+            background: 'rgba(0,0,0,0.5)',
+          }}
+        />
+      )}
+
       {/* Body */}
       <div style={{ display: 'flex', paddingTop: 56, minHeight: '100vh' }}>
 
         {/* Left sidebar */}
         <aside style={{
-          width: 240, flexShrink: 0, position: 'fixed', top: 56, bottom: 0,
+          width: 240, flexShrink: 0,
+          position: 'fixed', top: 56, bottom: 0,
           background: T.sidebar, borderRight: `1px solid ${T.border}`,
           overflowY: 'auto', display: 'flex', flexDirection: 'column',
+          zIndex: 150,
+          ...(isMobile ? {
+            transform: sidebarOpen ? 'translateX(0)' : 'translateX(-100%)',
+            transition: 'transform 0.25s ease',
+          } : {}),
         }}>
           {/* Search */}
           <div style={{ padding: '16px 16px 12px', position: 'relative', flexShrink: 0 }}>
@@ -1924,8 +1978,10 @@ export default function App() {
 
         {/* Main content */}
         <main ref={contentRef} style={{
-          flex: 1, marginLeft: 240, marginRight: 200,
-          padding: '48px 56px 96px',
+          flex: 1,
+          marginLeft: isMobile ? 0 : 240,
+          marginRight: isMobile ? 0 : 200,
+          padding: isMobile ? '32px 20px 80px' : '48px 56px 96px',
           minWidth: 0,
         }}>
           <div id="overview">
@@ -1957,8 +2013,8 @@ export default function App() {
           </div>
         </main>
 
-        {/* Right TOC */}
-        <aside style={{
+        {/* Right TOC — hidden on mobile */}
+        {!isMobile && <aside style={{
           width: 200, flexShrink: 0, position: 'fixed', top: 56, right: 0, bottom: 0,
           padding: '28px 20px', overflowY: 'auto',
           borderLeft: `1px solid ${T.border}`,
@@ -1984,8 +2040,9 @@ export default function App() {
               </a>
             )
           })}
-        </aside>
+        </aside>}
       </div>
     </div>
+    </MobileCtx.Provider>
   )
 }
