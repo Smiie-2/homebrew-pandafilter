@@ -1130,9 +1130,9 @@ function SectionHandlers() {
 
       <div style={{
         background: T.card, border: `1px solid ${T.border}`, borderRadius: 10,
-        overflow: 'hidden', marginBottom: 0,
+        overflow: 'auto', marginBottom: 0,
       }}>
-        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5 }}>
+        <table style={{ width: '100%', minWidth: 520, borderCollapse: 'collapse', fontSize: 12.5 }}>
           <thead>
             <tr style={{ background: T.sidebar }}>
               {['Handler', 'Aliases / keys', 'Behavior'].map((h, i) => (
@@ -1240,6 +1240,7 @@ panda index              # manually rebuild the index
 }
 
 function SectionTokenSavings() {
+  const isMobile = useIsMobile()
   const [page, setPage] = useState(0)
   const PER = 15
   const dataRows = tokenTable.map(r => [
@@ -1270,7 +1271,7 @@ function SectionTokenSavings() {
         { value: '−82%',   label: 'overall reduction',      color: T.cyan   },
       ]} />
 
-      <div style={{ display: 'grid', gridTemplateColumns: '220px 1fr', gap: 24, marginBottom: 28 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '220px 1fr', gap: 24, marginBottom: 28 }}>
         <div style={{
           background: T.card, border: `1px solid ${T.border}`, borderRadius: 10,
           padding: '24px 20px', display: 'flex', flexDirection: 'column', alignItems: 'center',
@@ -1332,6 +1333,7 @@ function SectionTokenSavings() {
 }
 
 function SectionRetrieval() {
+  const isMobile = useIsMobile()
   return (
     <>
       <H2 id="file-retrieval">File retrieval</H2>
@@ -1354,7 +1356,7 @@ function SectionRetrieval() {
         Panda's hybrid approach (BERT + lexical scoring on structural signatures).
       </P>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, marginBottom: 24 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: 20, marginBottom: 24 }}>
         <div style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: 10, padding: '20px 20px 12px' }}>
           <p style={{ fontSize: 12, color: T.sub, marginBottom: 16 }}>Hit@5 — correct file in top 5 results</p>
           <ResponsiveContainer width="100%" height={220}>
