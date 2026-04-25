@@ -65,15 +65,24 @@ if ! echo "$PATH" | grep -q '.cargo/bin'; then
   echo "  (effective now in this session)"
 fi
 
-# ── Register Claude Code hooks ────────────────────────────────────────────────
+# ── Register hooks for all detected agents ────────────────────────────────────
 
 echo ""
+PANDA_BIN=""
 if command -v panda &>/dev/null; then
-  panda init && echo "Claude Code hooks registered."
+  PANDA_BIN="panda"
 elif [ -x "$CARGO_BIN/panda" ]; then
-  "$CARGO_BIN/panda" init && echo "Claude Code hooks registered."
+  PANDA_BIN="$CARGO_BIN/panda"
+fi
+
+if [ -n "$PANDA_BIN" ]; then
+  if "$PANDA_BIN" init --agent all --skip-model; then
+    echo "Hooks registered for all detected agents."
+  else
+    echo "Hook setup encountered an issue — run 'panda init --agent all' to retry."
+  fi
 else
-  echo "Run 'panda init' to register Claude Code hooks."
+  echo "Run 'panda init --agent all' to register hooks once panda is on your PATH."
 fi
 
 echo ""

@@ -228,7 +228,7 @@ fn main() {
             (false, AgentTarget::Codex)     => init_agent("codex"),
             (false, AgentTarget::Windsurf)  => init_agent("windsurf"),
             (false, AgentTarget::Openclaw)  => init_agent("openclaw"),
-            (false, AgentTarget::All)       => init_all_agents(),
+            (false, AgentTarget::All)       => init_all_agents(skip_model),
             (true,  AgentTarget::Copilot)   => uninstall_agent("copilot"),
             (true,  AgentTarget::Gemini)    => uninstall_agent("gemini"),
             (true,  AgentTarget::Cline)     => uninstall_agent("cline"),
@@ -781,9 +781,9 @@ fn uninstall_agent(agent: &str) -> anyhow::Result<()> {
     }
 }
 
-fn init_all_agents() -> anyhow::Result<()> {
+fn init_all_agents(skip_model: bool) -> anyhow::Result<()> {
     // Always install the Claude (default) agent first
-    init(false)?;
+    init(skip_model)?;
     // Then attempt each new agent, printing warnings on failure
     for agent in &["copilot", "gemini", "cline", "codex", "windsurf", "openclaw"] {
         if let Err(e) = init_agent(agent) {
