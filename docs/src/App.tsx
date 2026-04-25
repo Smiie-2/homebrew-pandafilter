@@ -146,6 +146,9 @@ const NAV = [
     { id: 'token-savings',   label: 'Token savings'   },
     { id: 'file-retrieval',  label: 'File retrieval'  },
   ]},
+  { group: "What's New", items: [
+    { id: 'v130',       label: 'v1.3.0 release'    },
+  ]},
   { group: 'Reference', items: [
     { id: 'commands',   label: 'Commands'      },
     { id: 'config',     label: 'Configuration' },
@@ -168,6 +171,7 @@ const TOC_ITEMS = [
   { id: 'focus',          label: 'Context focusing'      },
   { id: 'token-savings',  label: 'Token savings'         },
   { id: 'file-retrieval', label: 'File retrieval'        },
+  { id: 'v130',           label: "v1.3.0 release"        },
   { id: 'commands',       label: 'Commands'              },
   { id: 'config',         label: 'Configuration'         },
   { id: 'security',       label: 'Privacy & security'    },
@@ -519,13 +523,16 @@ function SectionOverview() {
         background: 'linear-gradient(135deg, rgba(34,211,238,0.07) 0%, rgba(167,139,250,0.05) 100%)',
         border: `1px solid ${T.border}`, borderRadius: 12, padding: '32px 36px', marginBottom: 24,
       }}>
-        <h1 style={{ fontSize: 28, fontWeight: 800, color: T.text, marginBottom: 12, lineHeight: 1.2 }}>
+        <h1 style={{ fontSize: 28, fontWeight: 800, color: T.text, marginBottom: 8, lineHeight: 1.2 }}>
           PandaFilter
         </h1>
-        <p style={{ fontSize: 16, color: T.sub, lineHeight: 1.7, marginBottom: 0, maxWidth: 620 }}>
-          Cut your AI agent's token bill by 60–99% — by removing the noise from what it reads.
-          PandaFilter intercepts build output, strips the garbage, and surfaces the right files.
-          No config changes. Runs 100% locally.
+        <p style={{ fontSize: 13, fontWeight: 600, color: T.cyan, marginBottom: 12, letterSpacing: '0.03em' }}>
+          The context intelligence layer for AI coding agents
+        </p>
+        <p style={{ fontSize: 16, color: T.sub, lineHeight: 1.7, marginBottom: 0, maxWidth: 640 }}>
+          PandaFilter sits between your tools and your AI — compressing noise, routing content to the
+          right strategy, preserving session state across compactions, and surfacing the files that
+          actually matter. No config changes required. Runs 100% locally.
         </p>
       </div>
 
@@ -551,9 +558,26 @@ function SectionOverview() {
         what matters, not everything.
       </P>
 
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 12, margin: '28px 0' }}>
+        {[
+          { title: 'Intelligent Compression', color: T.cyan, desc: 'Raw command output is filtered, deduplicated, and semantically compressed by a BERT-powered pipeline that understands what matters for your task — not just what matches a regex.' },
+          { title: 'Adaptive Routing', color: T.violet, desc: 'A content-aware router activates only the strategies relevant to each output: error-focus for test failures, dedup for log streams, structural digest for unchanged re-reads, semantic summarization for prose.' },
+          { title: 'Session Intelligence', color: T.emerald, desc: "PandaFilter learns your codebase's noise patterns across sessions, tracking what you've read, what you've changed, and where context pressure is building — adapting its strategy in real time." },
+          { title: 'Compaction Survival', color: '#f59e0b', desc: "When your agent's context fills up and auto-compacts, PandaFilter preserves what matters: edited files, error signatures, key decisions. The next session starts oriented, not blank." },
+        ].map(({ title, color, desc }) => (
+          <div key={title} style={{
+            background: T.card, border: `1px solid ${T.border}`, borderRadius: 10,
+            padding: '18px 20px', borderTop: `2px solid ${color}`,
+          }}>
+            <div style={{ fontSize: 13, fontWeight: 700, color, marginBottom: 8 }}>{title}</div>
+            <div style={{ fontSize: 13, color: T.sub, lineHeight: 1.6 }}>{desc}</div>
+          </div>
+        ))}
+      </div>
+
       <Callout type="tip">
-        Run <Code>panda gain</Code> after any session to see your cumulative token savings broken
-        down by command.
+        Run <Code>panda gain</Code> after any session to see your cumulative token savings and
+        quality score broken down by command.
       </Callout>
     </>
   )
@@ -860,7 +884,8 @@ function SectionPipeline() {
       <H2 id="pipeline">Filtering pipeline</H2>
       <P>
         Every command output passes through a deterministic 7-stage pipeline before reaching the agent.
-        Outputs under 15 tokens skip the pipeline entirely.
+        Outputs under 15 tokens skip the pipeline entirely. With the MoE router enabled, a
+        content-aware routing step fires first to select the most relevant filter strategy.
       </P>
 
       <div style={{
@@ -868,6 +893,7 @@ function SectionPipeline() {
         padding: '24px 28px', marginBottom: 24,
       }}>
         {[
+          ['R', 'MoE content router', 'opt-in — selects the top expert strategy per content type; see v1.3.0'],
           ['0', 'Hard input ceiling', '200k chars — truncated before any stage'],
           ['1', 'Strip ANSI codes',   'Remove color codes and terminal escape sequences'],
           ['2', 'Normalize whitespace', 'Collapse blank lines, trim trailing space'],
@@ -880,18 +906,27 @@ function SectionPipeline() {
           <div key={step} style={{ display: 'flex', gap: 16, marginBottom: 14, alignItems: 'flex-start' }}>
             <span style={{
               flexShrink: 0, width: 24, height: 24, borderRadius: 6,
-              background: T.sidebar, border: `1px solid ${T.border}`,
+              background: step === 'R' ? 'rgba(167,139,250,0.12)' : T.sidebar,
+              border: `1px solid ${step === 'R' ? T.violet : T.border}`,
               display: 'flex', alignItems: 'center', justifyContent: 'center',
-              fontSize: 11, fontWeight: 700, color: T.cyan,
+              fontSize: 11, fontWeight: 700, color: step === 'R' ? T.violet : T.cyan,
               fontFamily: 'monospace',
             }}>{step}</span>
             <div>
-              <span style={{ fontSize: 14, fontWeight: 600, color: T.text }}>{title}</span>
+              <span style={{ fontSize: 14, fontWeight: 600, color: step === 'R' ? T.violet : T.text }}>{title}</span>
               <span style={{ fontSize: 13, color: T.sub, marginLeft: 8 }}>— {desc}</span>
             </div>
           </div>
         ))}
       </div>
+
+      <H3>Re-read delta mode</H3>
+      <P>
+        When a file is read more than once in a session, PandaFilter sends a unified diff instead
+        of the full content. If the file is unchanged, it returns a structural digest — function
+        and class signatures only. Both activate automatically; no config needed. Saves 60–95% tokens
+        on typical re-read patterns.
+      </P>
 
       <Callout type="note">
         <strong style={{ color: T.text }}>Pre-run cache</strong> — git, kubectl, docker, and terraform commands
@@ -1488,6 +1523,87 @@ function SectionRetrieval() {
   )
 }
 
+function SectionV130() {
+  return (
+    <>
+      <H2 id="v130">What's new in v1.3.0</H2>
+      <P>
+        v1.3.0 adds four major capabilities: read delta mode, pre-compaction session digests,
+        a MoE-inspired sparse filter router, and a multi-signal quality score.
+      </P>
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 16, marginBottom: 28 }}>
+        {[
+          {
+            tag: 'Read Delta Mode',
+            color: T.cyan,
+            desc: 'File re-reads now send a unified diff instead of full file content. Unchanged re-reads return structural digests — function and class signatures only. Activates automatically for Claude Code. Saves 60–95% tokens on re-reads.',
+            config: null,
+          },
+          {
+            tag: 'Structural Map',
+            color: T.cyan,
+            desc: 'Extracts function, struct, class, and type signatures for Rust, Python, TypeScript/JS, Go, Java, Ruby, and C/C++. Used by delta mode on unchanged re-reads to send a compact structural digest instead of the full file.',
+            config: null,
+          },
+          {
+            tag: 'Pre-Compaction Digest',
+            color: '#f59e0b',
+            desc: "Captures session state (edited files, error signatures, top commands, key decisions) before Claude auto-compacts and restores it in the new session via additionalContext. Installed automatically with panda init.",
+            config: null,
+          },
+          {
+            tag: 'MoE Sparse Filter Router',
+            color: T.violet,
+            desc: 'A content-aware router analyzes each input and activates only the most relevant filter strategy: error-focus for test failures, dedup for log streams, structural digest for unchanged re-reads, semantic summarization for prose, tree compression for directory listings.',
+            config: 'use_router = true',
+          },
+          {
+            tag: 'Expert Collapse Detection',
+            color: T.violet,
+            desc: 'Tracks per-expert activation counts. When one expert exceeds 70% share, a noise bonus is applied to prevent over-specialization. View the utilization breakdown with panda gain --insight.',
+            config: 'router_exploration_noise = true',
+          },
+          {
+            tag: 'Quality Score',
+            color: T.emerald,
+            desc: 'panda gain now shows a multi-signal quality grade (S/A/B/C/D/F) based on compression ratio, cache hit rate, and delta re-read rate. Full per-signal breakdown with actionable tips in panda gain --insight.',
+            config: null,
+          },
+        ].map(({ tag, color, desc, config }) => (
+          <div key={tag} style={{
+            background: T.card, border: `1px solid ${T.border}`, borderRadius: 10,
+            padding: '16px 20px', borderLeft: `3px solid ${color}`,
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8, flexWrap: 'wrap' }}>
+              <span style={{ fontSize: 13, fontWeight: 700, color }}>{tag}</span>
+              {config && (
+                <code style={{
+                  fontSize: 11, background: 'rgba(167,139,250,0.1)', color: T.violet,
+                  border: `1px solid rgba(167,139,250,0.25)`, borderRadius: 4,
+                  padding: '1px 7px', fontFamily: 'monospace',
+                }}>{config}</code>
+              )}
+            </div>
+            <div style={{ fontSize: 13, color: T.sub, lineHeight: 1.65 }}>{desc}</div>
+          </div>
+        ))}
+      </div>
+
+      <H3>Quick upgrade</H3>
+      <CodeBlock lang="bash">{`
+brew upgrade pandafilter   # or re-run the install script on Linux
+panda init                 # re-registers hooks including PreCompact/SessionStart
+      `}</CodeBlock>
+
+      <Callout type="tip">
+        See the <a href="https://github.com/AssafWoo/PandaFilter/blob/main/CHANGELOG.md" style={{ color: T.cyan }}>CHANGELOG</a> for
+        the full list of internals changes and improvements.
+      </Callout>
+    </>
+  )
+}
+
 function SectionCommands() {
   return (
     <>
@@ -1560,12 +1676,17 @@ input_char_ceiling = 200000
 output_char_cap = 50000
 # cost_per_million_tokens = 15.0
 
+# MoE sparse filter router (v1.3.0, opt-in)
+use_router = false                # activate content-aware expert routing
+router_exploration_noise = false  # add exploration bonus to prevent expert collapse
+
 [tee]
 enabled = true
 mode = "aggressive"   # "aggressive" | "always" | "never"
 
 [read]
-mode = "auto"   # "passthrough" | "auto" | "strip" | "aggressive"
+mode = "auto"   # "passthrough" | "auto" | "strip" | "aggressive" | "delta"
+# delta: re-reads send unified diffs; unchanged reads send structural digest (v1.3.0)
 
 [focus]
 enabled = false
@@ -2252,6 +2373,7 @@ export default function App() {
           <SectionFocus />
           <SectionTokenSavings />
           <SectionRetrieval />
+          <SectionV130 />
           <SectionCommands />
           <SectionConfig />
           <SectionSecurity />

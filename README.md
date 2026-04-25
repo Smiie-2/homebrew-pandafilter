@@ -4,7 +4,9 @@
 
 <h1 align="center">PandaFilter</h1>
 
-<p align="center"><strong>Cut your AI agent's token bill by 60–95% — by removing the noise from what it reads.</strong></p>
+<p align="center"><strong>The context intelligence layer for AI coding agents.</strong></p>
+
+<p align="center">The layer between your tools and your AI. PandaFilter understands what's noise and what matters — compressing, routing, and preserving the right context so your agent thinks faster, costs less, and never loses its place.</p>
 
 <p align="center">
   <a href="https://github.com/AssafWoo/PandaFilter/stargazers">
@@ -54,6 +56,28 @@ panda init --agent windsurf         # Windsurf
 panda init --agent cline            # Cline
 panda init --agent copilot          # VS Code Copilot
 ```
+
+---
+
+## What PandaFilter Does
+
+### 1. Intelligent Compression
+Raw command output is filtered, deduplicated, and semantically compressed by a BERT-powered pipeline that understands what matters for your task — not just what matches a regex. When your AI agent runs `pip install`, `cargo build`, or `npm install`, PandaFilter intercepts the output and strips download progress, module graphs, and passing test lines. The agent sees a clean summary with errors, warnings, and results. Nothing useful is dropped.
+
+### 2. Adaptive Routing (new in v1.3.0)
+A content-aware router analyzes each output and activates only the strategies relevant to it: error-focus for test failures, dedup for log streams, structural digest for unchanged file re-reads, semantic summarization for prose. No more one-size-fits-all.
+
+Enable with `use_router = true` in `panda.toml`.
+
+### 3. Session Intelligence
+PandaFilter learns your codebase's noise patterns across sessions. It tracks what you've read, what you've changed, and where the context pressure is building — adapting its compression strategy in real time.
+
+**New in v1.3.0:** File re-reads now send diffs instead of full file content. Unchanged re-reads return structural digests (function/class signatures). Both happen automatically — no config needed.
+
+### 4. Compaction Survival (new in v1.3.0)
+When your agent's context fills up and auto-compacts, PandaFilter preserves what matters: edited files, error signatures, key decisions. The next session starts oriented, not blank.
+
+Requires Claude Code and is installed automatically with `panda init`.
 
 ---
 
@@ -129,6 +153,18 @@ Numbers from `ccr/tests/handler_benchmarks.rs`. Run `panda gain` to see your own
 | `mypy` | 2,053 | 1,088 | −47% |
 | `stylelint` | 1,100 | 845 | −23% |
 | **Total** | **81,882** | **14,347** | **−82%** |
+
+---
+
+## What's new in v1.3.0
+
+| Feature | Before | After (PandaFilter v1.3.0) |
+|---|---|---|
+| Bash output | Full output | Compressed by type (error-focus, dedup, stats, etc.) |
+| File re-reads | Full file every time | Delta diff or structural digest |
+| Context compaction | 60–70% conversation lost | Session digest preserved and restored |
+| Filtering strategy | Fixed pipeline always | Adaptive router — right expert per content type |
+| Quality visibility | Token savings only | Multi-signal quality score in `panda gain` |
 
 ---
 
@@ -294,12 +330,18 @@ input_char_ceiling = 200000
 output_char_cap = 50000
 # cost_per_million_tokens = 15.0
 
+# v1.3.0: Adaptive MoE router (opt-in)
+# use_router = true                  # enable adaptive expert routing
+# router_exploration_noise = true    # prevent expert collapse in long sessions
+
 [tee]
 enabled = true
 mode = "aggressive"   # "aggressive" | "always" | "never"
 
 [read]
-mode = "auto"   # "passthrough" | "auto" | "strip" | "aggressive"
+mode = "auto"   # "passthrough" | "auto" | "strip" | "aggressive" | "structural"
+# v1.3.0: delta mode (re-reads send diffs) and structural mode (signature-only) are
+# now active automatically — no config change needed.
 
 [focus]
 enabled = false       # disabled by default — enable with `panda focus --enable` after testing
@@ -355,6 +397,8 @@ State tracked via `PANDA_SESSION_ID=$PPID`, stored at `~/.local/share/panda/sess
 - **Cross-turn dedup** — identical outputs (cosine > 0.92) collapse to `[same output as turn 4 (3m ago) — 1.2k tokens saved]`.
 - **Elastic context** — pipeline pressure scales with session size. At >80% pressure: `[⚠ context near full — run panda compress --scan-session]`.
 - **Intent-aware query** — reads the agent's last message from the live session JSONL and uses it as the BERT query.
+- **File delta re-reads** *(v1.3.0)* — re-reading a changed file sends a unified diff instead of the full content. Unchanged re-reads send a structural digest (function/class signatures). Both save 60–95% of re-read tokens automatically.
+- **Compaction digest** *(v1.3.0, Claude Code only)* — before Claude auto-compacts, PandaFilter serializes edited files, error signatures, and top commands to `~/.local/share/panda/compacts/`. On the next session start, the digest is injected into context so the agent resumes oriented.
 
 </details>
 

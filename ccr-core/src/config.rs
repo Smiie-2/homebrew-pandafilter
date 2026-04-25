@@ -93,6 +93,14 @@ pub struct GlobalConfig {
     /// Hard cap on pipeline output chars. 0 = disabled. Default 50_000.
     #[serde(default = "default_output_char_cap")]
     pub output_char_cap: usize,
+    /// Enable the MoE-inspired sparse filter router (opt-in, default false).
+    /// When true, content features drive expert selection instead of the fixed pipeline.
+    #[serde(default)]
+    pub use_router: bool,
+    /// When use_router=true, inject a small exploration bonus (+0.5) to underused
+    /// experts when one expert exceeds 70% of activations. Prevents expert collapse.
+    #[serde(default)]
+    pub router_exploration_noise: bool,
 }
 
 fn default_input_char_ceiling() -> usize {
@@ -129,6 +137,8 @@ impl Default for GlobalConfig {
             cost_per_million_tokens: None,
             input_char_ceiling: default_input_char_ceiling(),
             output_char_cap: default_output_char_cap(),
+            use_router: false,
+            router_exploration_noise: false,
         }
     }
 }

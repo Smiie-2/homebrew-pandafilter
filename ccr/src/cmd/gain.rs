@@ -394,6 +394,9 @@ fn print_summary(records: &[Analytics], breakdown: bool) {
         }
     }
 
+    // ── Quality score banner ──
+    print_quality_banner(90);
+
     // ── Focus tip (shown only when focus hook is not yet registered) ──
     if !is_focus_registered() {
         println!();
@@ -913,6 +916,9 @@ fn print_insight(records: &[Analytics], days: u32) {
     // ── Context Focusing ─────────────────────────────────────────────────────
     print_focus_insight_compact(cutoff);
 
+    // ── Quality Score ────────────────────────────────────────────────────────
+    print_quality_insight(days);
+
     // ── Tip ──────────────────────────────────────────────────────────────────
     print_insight_tip(&cmd_rows, total_saved, cache_hits, cutoff);
 }
@@ -1187,6 +1193,151 @@ fn focus_avg_exclusion_ratio(cutoff: u64) -> Option<f64> {
     Some(excluded as f64 / total_in_repo as f64 * 100.0)
 }
 
+
+// ─── Quality score ────────────────────────────────────────────────────────────
+
+/// Letter grade from numeric score.
+fn quality_grade(score: f64) -> &'static str {
+    if score >= 90.0 { "S" }
+    else if score >= 80.0 { "A" }
+    else if score >= 70.0 { "B" }
+    else if score >= 55.0 { "C" }
+    else if score >= 40.0 { "D" }
+    else { "F" }
+}
+
+/// Compute a 0-100 quality score from available signals.
+///
+/// Weights: compression 25%, cache hit 20%, delta read 20%, total runs 15%,
+/// savings trend 20% (proxy for consistent usage).
+pub fn compute_quality_score(days: u32) -> Option<(f64, &'static str)> {
+    let signals = crate::analytics_db::get_quality_signals(days).ok()?;
+
+    if signals.total_records == 0 {
+        return None;
+    }
+
+    // Compression signal: 0-100 based on avg savings %, capped at 90%
+    let compression_signal = (signals.avg_savings_pct / 90.0 * 100.0).min(100.0);
+
+    // Cache hit rate signal: 0-100
+    let cache_signal = signals.cache_hit_rate * 100.0;
+
+    // Delta read rate signal: 0-100
+    let delta_signal = signals.delta_read_rate * 100.0;
+
+    // Activity signal: 100 if ≥30 records, scales down
+    let activity_signal = (signals.total_records as f64 / 30.0 * 100.0).min(100.0);
+
+    // Savings consistency: penalize if avg savings < 30% (below par)
+    let consistency_signal = if signals.avg_savings_pct >= 30.0 { 100.0 }
+        else { signals.avg_savings_pct / 30.0 * 100.0 };
+
+    let score = compression_signal * 0.25
+        + cache_signal * 0.20
+        + delta_signal * 0.20
+        + activity_signal * 0.15
+        + consistency_signal * 0.20;
+
+    let grade = quality_grade(score);
+    Some((score, grade))
+}
+
+/// Print the quality score banner (one line) for the summary view.
+pub fn print_quality_banner(days: u32) {
+    let Some((score, grade)) = compute_quality_score(days) else {
+        return;
+    };
+
+    let grade_colored = match grade {
+        "S" | "A" => grade.if_supports_color(Stdout, |t| t.green()).to_string(),
+        "B" => grade.if_supports_color(Stdout, |t| t.cyan()).to_string(),
+        "C" => grade.if_supports_color(Stdout, |t| t.yellow()).to_string(),
+        _ => grade.if_supports_color(Stdout, |t| t.red()).to_string(),
+    };
+
+    println!(
+        "  Quality:        {}  {}",
+        format!("{} ({:.0}/100)", grade_colored, score),
+        format!("· run `panda gain --insight` for details")
+            .if_supports_color(Stdout, |t| t.dimmed()),
+    );
+}
+
+/// Print detailed quality score breakdown for `--insight`.
+fn print_quality_insight(days: u32) {
+    let Ok(signals) = crate::analytics_db::get_quality_signals(days) else {
+        return;
+    };
+
+    if signals.total_records == 0 {
+        return;
+    }
+
+    let Some((score, grade)) = compute_quality_score(days) else {
+        return;
+    };
+
+    println!();
+    let grade_colored = match grade {
+        "S" | "A" => grade.if_supports_color(Stdout, |t| t.green()).to_string(),
+        "B" => grade.if_supports_color(Stdout, |t| t.cyan()).to_string(),
+        "C" => grade.if_supports_color(Stdout, |t| t.yellow()).to_string(),
+        _ => grade.if_supports_color(Stdout, |t| t.red()).to_string(),
+    };
+
+    println!(
+        "  {} — {} ({:.0}/100)",
+        "Quality Score".if_supports_color(Stdout, |t| t.bold()),
+        grade_colored,
+        score,
+    );
+
+    let bar = |v: f64| -> String {
+        let filled = ((v / 100.0) * 16.0) as usize;
+        let empty = 16usize.saturating_sub(filled);
+        format!("{}{}", "█".repeat(filled), "░".repeat(empty))
+    };
+
+    let compression_signal = (signals.avg_savings_pct / 90.0 * 100.0).min(100.0);
+    let cache_signal = signals.cache_hit_rate * 100.0;
+    let delta_signal = signals.delta_read_rate * 100.0;
+
+    println!(
+        "    Compression     {:.0}/100  {}  (avg {:.0}% savings)",
+        compression_signal,
+        bar(compression_signal).if_supports_color(Stdout, |t| t.green()),
+        signals.avg_savings_pct,
+    );
+    println!(
+        "    Cache hits      {:.0}/100  {}  ({:.0}% of runs)",
+        cache_signal,
+        bar(cache_signal).if_supports_color(Stdout, |t| t.cyan()),
+        cache_signal,
+    );
+    println!(
+        "    Delta re-reads  {:.0}/100  {}  ({:.0}% of file reads)",
+        delta_signal,
+        bar(delta_signal).if_supports_color(Stdout, |t| t.cyan()),
+        delta_signal,
+    );
+
+    // Actionable tips for low signals
+    if delta_signal < 20.0 {
+        println!(
+            "    {}",
+            "Tip: re-reads send full files — delta mode activates automatically on repeated reads."
+                .if_supports_color(Stdout, |t| t.dimmed()),
+        );
+    }
+    if compression_signal < 40.0 {
+        println!(
+            "    {}",
+            "Tip: low compression — check `panda discover` for unoptimized commands."
+                .if_supports_color(Stdout, |t| t.dimmed()),
+        );
+    }
+}
 
 // ─── Tests ────────────────────────────────────────────────────────────────────
 

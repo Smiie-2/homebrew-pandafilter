@@ -10,6 +10,11 @@ use std::path::PathBuf;
 const MAX_ENTRIES: usize = 30;
 const SIMILARITY_THRESHOLD: f32 = 0.92;
 
+/// Max number of files stored in the per-session content cache for delta/structural mode.
+const MAX_CACHE_FILES: usize = 20;
+/// Max content bytes stored per cached file (20 KB).
+const MAX_CACHE_FILE_BYTES: usize = 20_480;
+
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -59,6 +64,21 @@ pub struct SessionState {
     /// Used to preserve context around recently-edited areas during re-reads.
     #[serde(default)]
     pub recent_edits: std::collections::HashMap<String, Vec<(usize, usize)>>,
+    /// Per-file content cache for delta/structural read mode.
+    /// Keys are absolute file paths; values are (mtime, content_snapshot).
+    /// Capped at `MAX_CACHE_FILES` entries and `MAX_CACHE_FILE_BYTES` per file.
+    #[serde(default, skip_serializing_if = "std::collections::HashMap::is_empty")]
+    pub file_content_cache: std::collections::HashMap<String, FileCacheEntry>,
+}
+
+/// Cached content of a file read earlier in this session.
+/// Used by delta mode (send only what changed) and structural mode (send signatures).
+#[derive(Serialize, Deserialize, Clone, Default)]
+pub struct FileCacheEntry {
+    /// Unix timestamp of the file's mtime when it was cached.
+    pub mtime_secs: u64,
+    /// File content snapshot (capped at `MAX_CACHE_FILE_BYTES`).
+    pub content: String,
 }
 
 pub struct SessionHit {
@@ -546,6 +566,137 @@ impl SessionState {
                     .collect()
             })
             .unwrap_or_default()
+    }
+}
+
+// ── File content cache (delta/structural mode) ───────────────────────────────
+
+impl SessionState {
+    /// Get the cached content for a file, if present.
+    /// Returns `(mtime_secs, content)`.
+    pub fn get_file_cache(&self, file_path: &str) -> Option<(u64, &str)> {
+        self.file_content_cache
+            .get(file_path)
+            .map(|e| (e.mtime_secs, e.content.as_str()))
+    }
+
+    /// Store or update the cached content for a file.
+    ///
+    /// Enforces:
+    /// - `MAX_CACHE_FILE_BYTES` per entry (content truncated at a line boundary)
+    /// - `MAX_CACHE_FILES` total entries (evicts oldest insertion when full)
+    pub fn set_file_cache(&mut self, file_path: &str, mtime_secs: u64, content: &str) {
+        // Skip files that are too large even when truncated
+        if content.len() > MAX_CACHE_FILE_BYTES * 2 {
+            return;
+        }
+
+        // Truncate at line boundary if content exceeds per-file cap
+        let stored_content = if content.len() <= MAX_CACHE_FILE_BYTES {
+            content.to_string()
+        } else {
+            // Walk backwards from the limit to find the last newline
+            let truncated = &content[..MAX_CACHE_FILE_BYTES];
+            truncated
+                .rfind('\n')
+                .map(|pos| truncated[..=pos].to_string())
+                .unwrap_or_else(|| truncated.to_string())
+        };
+
+        // Evict the entry with the oldest insertion (first key) if at capacity
+        if self.file_content_cache.len() >= MAX_CACHE_FILES
+            && !self.file_content_cache.contains_key(file_path)
+        {
+            if let Some(oldest_key) = self.file_content_cache.keys().next().cloned() {
+                self.file_content_cache.remove(&oldest_key);
+            }
+        }
+
+        self.file_content_cache.insert(
+            file_path.to_string(),
+            FileCacheEntry {
+                mtime_secs,
+                content: stored_content,
+            },
+        );
+    }
+
+    /// Invalidate the cache entry for `file_path` (called on Edit/Write).
+    pub fn invalidate_file_cache(&mut self, file_path: &str) {
+        self.file_content_cache.remove(file_path);
+    }
+}
+
+// ── Session digest for pre-compaction capture ─────────────────────────────────
+
+/// Serialised session context injected after compaction to restore orientation.
+pub struct SessionDigest {
+    pub markdown: String,
+}
+
+impl SessionState {
+    /// Build a human-readable Markdown digest of the current session.
+    /// Captures: modified files with line ranges, recent error signatures,
+    /// top commands by token cost, and context centroid notes.
+    pub fn extract_digest(&self) -> SessionDigest {
+        let mut md = String::from("## PandaFilter Session Digest (pre-compaction)\n\n");
+
+        // Files modified this session
+        if !self.recent_edits.is_empty() {
+            md.push_str("### Files Modified\n");
+            let mut files: Vec<(&String, &Vec<(usize, usize)>)> = self.recent_edits.iter().collect();
+            files.sort_by_key(|(k, _)| k.as_str());
+            for (path, ranges) in &files {
+                let range_str: Vec<String> = ranges
+                    .iter()
+                    .map(|(s, e)| format!("L{}-{}", s, e))
+                    .collect();
+                md.push_str(&format!("- `{}` ({})\n", path, range_str.join(", ")));
+            }
+            md.push('\n');
+        }
+
+        // Recent error signatures (unique, most recent first)
+        let error_sigs: Vec<&str> = self
+            .entries
+            .iter()
+            .rev()
+            .filter_map(|e| e.error_signatures.as_deref())
+            .take(5)
+            .collect();
+        if !error_sigs.is_empty() {
+            md.push_str("### Recent Error Signatures\n");
+            for sig in error_sigs {
+                for line in sig.lines().take(3) {
+                    md.push_str(&format!("- {}\n", line));
+                }
+            }
+            md.push('\n');
+        }
+
+        // Top commands by token cost
+        if !self.entries.is_empty() {
+            let mut cmd_tokens: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
+            for e in &self.entries {
+                *cmd_tokens.entry(e.cmd.as_str()).or_default() += e.tokens;
+            }
+            let mut cmd_list: Vec<(&&str, &usize)> = cmd_tokens.iter().collect();
+            cmd_list.sort_by(|a, b| b.1.cmp(a.1));
+
+            md.push_str("### Top Commands (by token cost)\n");
+            for (cmd, tokens) in cmd_list.iter().take(8) {
+                md.push_str(&format!("- `{}` — {} tokens\n", cmd, tokens));
+            }
+            md.push('\n');
+        }
+
+        // Session stats
+        md.push_str(&format!(
+            "### Session Stats\n- Total turns: {}\n- Total tokens: {}\n",
+            self.total_turns, self.total_tokens
+        ));
+
+        SessionDigest { markdown: md }
     }
 }
 

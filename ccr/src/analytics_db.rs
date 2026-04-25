@@ -577,6 +577,75 @@ pub fn focus_compression_stats(cutoff: u64) -> Result<FocusCompressionStats> {
     })
 }
 
+// ── Quality signals ───────────────────────────────────────────────────────────
+
+/// Aggregate signals used by the quality score in `panda gain --insight`.
+pub struct QualitySignals {
+    /// Average savings % over recent records (0-100).
+    pub avg_savings_pct: f64,
+    /// Fraction of invocations that were cache hits (0-1).
+    pub cache_hit_rate: f64,
+    /// Fraction of file re-reads that used delta or structural mode (0-1).
+    pub delta_read_rate: f64,
+    /// Total number of records in the window.
+    pub total_records: usize,
+}
+
+/// Compute quality signals from records in the last `days` days.
+pub fn get_quality_signals(days: u32) -> Result<QualitySignals> {
+    let conn = open()?;
+    let cutoff = now_secs().saturating_sub(days as u64 * 86400) as i64;
+
+    let (total_records, cache_hits, sum_savings): (i64, i64, f64) = conn
+        .query_row(
+            "SELECT COUNT(*), COALESCE(SUM(cache_hit), 0), COALESCE(AVG(savings_pct), 0.0) \
+             FROM records WHERE timestamp_secs >= ?1",
+            params![cutoff],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .unwrap_or((0, 0, 0.0));
+
+    // Delta/structural re-reads are stored with command = "(read-delta)" or "(read-structural)"
+    let delta_reads: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM records \
+             WHERE timestamp_secs >= ?1 \
+               AND (command = '(read-delta)' OR command = '(read-structural)')",
+            params![cutoff],
+            |row| row.get(0),
+        )
+        .unwrap_or(0);
+
+    let total_reads: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM records \
+             WHERE timestamp_secs >= ?1 \
+               AND (command = '(read-delta)' OR command = '(read-structural)' OR command = '(read)')",
+            params![cutoff],
+            |row| row.get(0),
+        )
+        .unwrap_or(0);
+
+    let cache_hit_rate = if total_records > 0 {
+        cache_hits as f64 / total_records as f64
+    } else {
+        0.0
+    };
+
+    let delta_read_rate = if total_reads > 0 {
+        delta_reads as f64 / total_reads as f64
+    } else {
+        0.0
+    };
+
+    Ok(QualitySignals {
+        avg_savings_pct: sum_savings,
+        cache_hit_rate,
+        delta_read_rate,
+        total_records: total_records as usize,
+    })
+}
+
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]

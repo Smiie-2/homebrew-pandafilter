@@ -87,7 +87,11 @@ enum Commands {
     Doctor,
     /// PostToolUse hook mode for Claude Code (hidden)
     #[command(hide = true)]
-    Hook,
+    Hook {
+        /// Optional subcommand: "compact-capture" | "compact-restore"
+        #[arg(value_name = "SUBCOMMAND")]
+        subcommand: Option<String>,
+    },
     /// Build the file-relationship graph index for Context Focusing
     Index {
         /// Repository path (default: current directory)
@@ -208,7 +212,8 @@ fn main() {
         Commands::Filter { command } => cmd::filter::run(command),
         Commands::Gain { history, days, breakdown, insight } => cmd::gain::run(history, days, breakdown, insight),
         Commands::Doctor => cmd::doctor::run(),
-        Commands::Hook => hook::run(),
+        Commands::Hook { subcommand: Some(ref sub) } => hook::run_lifecycle(sub),
+        Commands::Hook { subcommand: None } => hook::run(),
         Commands::Index { repo } => cmd::index::run(repo),
         Commands::Init { uninstall, agent, skip_model } => match (uninstall, agent) {
             (true,  AgentTarget::Claude)    => uninstall_panda(),
@@ -348,6 +353,12 @@ jq -n --argjson updated "$UPDATED_INPUT" \
     merge_hook(&mut settings, "PostToolUse", "WebSearch", &panda_hook_cmd);
     merge_hook(&mut settings, "PreToolUse",  "Bash", &panda_rewrite_cmd);
 
+    // Lifecycle hooks: no matcher field — use compact capture/restore
+    let compact_capture_cmd = format!("PANDA_SESSION_ID=$PPID {} hook compact-capture", panda_bin_str);
+    let compact_restore_cmd = format!("PANDA_SESSION_ID=$PPID {} hook compact-restore", panda_bin_str);
+    merge_lifecycle_hook(&mut settings, "PreCompact", &compact_capture_cmd);
+    merge_lifecycle_hook(&mut settings, "SessionStart", &compact_restore_cmd);
+
     let parent = settings_path.parent().unwrap();
     std::fs::create_dir_all(parent)?;
     std::fs::write(&settings_path, serde_json::to_string_pretty(&settings)?)?;
@@ -355,6 +366,8 @@ jq -n --argjson updated "$UPDATED_INPUT" \
     println!("PandaFilter hooks installed:");
     println!("  PostToolUse: {} → {}", panda_hook_cmd, settings_path.display());
     println!("  PreToolUse:  {} → {}", panda_rewrite_cmd, settings_path.display());
+    println!("  PreCompact:  {} → {}", compact_capture_cmd, settings_path.display());
+    println!("  SessionStart:{} → {}", compact_restore_cmd, settings_path.display());
 
     if skip_model {
         println!();
@@ -791,6 +804,45 @@ fn uninstall_all_agents() -> anyhow::Result<()> {
 
 /// Add a hook command to an existing hook-event array without removing other entries.
 /// If an entry for `matcher` already contains `command`, it is not duplicated.
+/// Merge a lifecycle hook entry (no matcher — PreCompact, SessionStart, etc.)
+fn merge_lifecycle_hook(settings: &mut serde_json::Value, event: &str, command: &str) {
+    let arr = settings["hooks"][event]
+        .as_array_mut()
+        .map(|a| std::mem::take(a))
+        .unwrap_or_default();
+
+    let new_hook = serde_json::json!({ "type": "command", "command": command });
+
+    // Look for an existing matcher-less entry and add to it, or append a new one.
+    let mut found = false;
+    let mut updated: Vec<serde_json::Value> = arr
+        .into_iter()
+        .map(|mut entry| {
+            if entry.get("matcher").is_none() {
+                let hooks = entry["hooks"].as_array_mut();
+                if let Some(hooks) = hooks {
+                    let already = hooks.iter().any(|h| {
+                        h.get("command").and_then(|c| c.as_str()) == Some(command)
+                    });
+                    if !already {
+                        hooks.push(new_hook.clone());
+                    }
+                }
+                found = true;
+            }
+            entry
+        })
+        .collect();
+
+    if !found {
+        updated.push(serde_json::json!({
+            "hooks": [new_hook]
+        }));
+    }
+
+    settings["hooks"][event] = serde_json::Value::Array(updated);
+}
+
 fn merge_hook(settings: &mut serde_json::Value, event: &str, matcher: &str, command: &str) {
     let arr = settings["hooks"][event]
         .as_array_mut()

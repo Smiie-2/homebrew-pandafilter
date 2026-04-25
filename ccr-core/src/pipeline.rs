@@ -88,6 +88,7 @@ impl Pipeline {
     /// `query` biases BERT importance scoring toward task-relevant lines when provided.
     /// `historical_centroid` — when `Some`, scoring is done against what this command
     ///   *usually* produces, so only genuinely new/anomalous lines are kept.
+    /// `router_features` — when `Some` and `use_router=true`, the router selects experts.
     pub fn process(
         &self,
         input: &str,
@@ -95,6 +96,34 @@ impl Pipeline {
         query: Option<&str>,
         historical_centroid: Option<&[f32]>,
     ) -> anyhow::Result<PipelineResult> {
+        // Router short-circuit: if use_router=true and features indicate PassThrough/Delta/Structure,
+        // we can skip the full pipeline for these cases. Full BERT path still runs for SemanticSummary.
+        if self.config.global.use_router {
+            let features = crate::router::extract_features(input);
+            let scores = crate::router::score_experts(&features);
+            let top = crate::router::top_k_sparse(&scores, features.session_pressure, false, None);
+            if let Some((expert, _)) = top.first() {
+                match expert {
+                    crate::router::ExpertId::PassThrough => {
+                        let n = count_tokens(input);
+                        return Ok(PipelineResult {
+                            output: input.to_string(),
+                            analytics: Analytics::compute(n, n),
+                            zoom_blocks: vec![],
+                        });
+                    }
+                    crate::router::ExpertId::StructureOnly => {
+                        // Structural digest is handled in hook.rs before pipeline;
+                        // here we fall through to the normal pipeline as a safety net.
+                    }
+                    _ => {
+                        // For all other experts, run the normal pipeline.
+                        // The router selection is advisory — the full pipeline refines it.
+                    }
+                }
+            }
+        }
+
         let input_tokens = count_tokens(input);
 
         // Stage 0: hard input ceiling (before any pipeline stage)

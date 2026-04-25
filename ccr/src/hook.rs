@@ -51,6 +51,16 @@ pub fn process(input: &str) -> Result<Option<String>> {
     }
 }
 
+/// Entry point for lifecycle hooks that don't carry tool I/O.
+/// `subcommand` is one of: "compact-capture", "compact-restore".
+pub fn run_lifecycle(subcommand: &str) -> Result<()> {
+    match subcommand {
+        "compact-capture" => process_compact_capture(),
+        "compact-restore" => process_compact_restore(),
+        _ => Ok(()),
+    }
+}
+
 pub fn run() -> Result<()> {
     // Integrity check: warn and exit if hook script has been tampered with.
     // PANDA_AGENT env var is set by Cursor's PostToolUse hook command; default = claude.
@@ -595,6 +605,81 @@ fn process_read(hook_input: HookInput) -> Result<Option<String>> {
         }
     }
 
+    // ── Delta / structural mode ───────────────────────────────────────────────
+    // Check if this file was read earlier in the session.
+    // If so, send a compact diff or structural skeleton instead of the full file.
+    {
+        let sid_delta = crate::session::session_id();
+        let mut session_delta = crate::session::SessionState::load(&sid_delta);
+
+        // Get current mtime from filesystem
+        let current_mtime: u64 = std::fs::metadata(&file_path)
+            .and_then(|m| m.modified())
+            .ok()
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+
+        if let Some((cached_mtime, cached_content)) = session_delta.get_file_cache(&file_path) {
+            if cached_mtime == current_mtime || cached_content == output_text.as_str() {
+                // File unchanged — return structural digest
+                let digest = panda_core::structure_map::extract(&file_path, &output_text);
+                let in_tok = panda_core::tokens::count_tokens(&output_text);
+                let out_tok = panda_core::tokens::count_tokens(&digest);
+                crate::util::append_analytics(&panda_core::analytics::Analytics::new(
+                    in_tok,
+                    out_tok,
+                    Some("(read-structural)".to_string()),
+                    None,
+                    None,
+                ));
+                let _ = crate::analytics_db::record_session_read(&sid_delta, &file_path, in_tok);
+                return Ok(Some(serde_json::to_string(&HookOutput { output: digest })?));
+            } else {
+                // File changed — try delta diff
+                let cached_owned = cached_content.to_string();
+                match panda_core::delta::compute(&file_path, &cached_owned, &output_text) {
+                    panda_core::delta::DeltaResult::Diff(diff) => {
+                        let in_tok = panda_core::tokens::count_tokens(&output_text);
+                        let out_tok = panda_core::tokens::count_tokens(&diff);
+                        crate::util::append_analytics(&panda_core::analytics::Analytics::new(
+                            in_tok,
+                            out_tok,
+                            Some("(read-delta)".to_string()),
+                            None,
+                            None,
+                        ));
+                        let _ = crate::analytics_db::record_session_read(&sid_delta, &file_path, in_tok);
+                        // Update cache with new content
+                        session_delta.set_file_cache(&file_path, current_mtime, &output_text);
+                        session_delta.save(&sid_delta);
+                        return Ok(Some(serde_json::to_string(&HookOutput { output: diff })?));
+                    }
+                    // TooLarge or NotEligible: fall through to normal pipeline
+                    panda_core::delta::DeltaResult::Unchanged => {
+                        let digest = panda_core::structure_map::extract(&file_path, &output_text);
+                        let in_tok = panda_core::tokens::count_tokens(&output_text);
+                        let out_tok = panda_core::tokens::count_tokens(&digest);
+                        crate::util::append_analytics(&panda_core::analytics::Analytics::new(
+                            in_tok, out_tok, Some("(read-structural)".to_string()), None, None,
+                        ));
+                        let _ = crate::analytics_db::record_session_read(&sid_delta, &file_path, in_tok);
+                        return Ok(Some(serde_json::to_string(&HookOutput { output: digest })?));
+                    }
+                    _ => {
+                        // TooLarge / NotEligible — update cache and fall through
+                        session_delta.set_file_cache(&file_path, current_mtime, &output_text);
+                        session_delta.save(&sid_delta);
+                    }
+                }
+            }
+        } else {
+            // First read: store in cache for future delta comparisons
+            session_delta.set_file_cache(&file_path, current_mtime, &output_text);
+            session_delta.save(&sid_delta);
+        }
+    }
+
     // Use file extension as command hint, intent as query
     let ext_hint = std::path::Path::new(&file_path)
         .extension()
@@ -767,6 +852,8 @@ fn process_edit(hook_input: HookInput) -> Result<Option<String>> {
             let sid = crate::session::session_id();
             let mut session = crate::session::SessionState::load(&sid);
             session.record_edit(&file_path, start_line, end_line);
+            // Invalidate the file content cache so the next read sends a fresh delta
+            session.invalidate_file_cache(&file_path);
             session.save(&sid);
 
             // Focus edit-hit tracking: was this edit in a preserved or compressed section?
@@ -2098,6 +2185,144 @@ fn rank_search_results_by_intent(results: &[String], intent: &str) -> Vec<usize>
     scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
     scored.into_iter().map(|(i, _)| i).collect()
 }
+
+// ── Lifecycle hook handlers ───────────────────────────────────────────────────
+
+fn process_compact_capture() -> Result<()> {
+    let sid = crate::session::session_id();
+    let session = crate::session::SessionState::load(&sid);
+
+    if session.total_turns == 0 {
+        // Nothing worth capturing
+        print!("{{\"suppressOutput\": true}}");
+        return Ok(());
+    }
+
+    let digest = session.extract_digest();
+
+    // SHA-256 fingerprint: session_id + top-5 edited file paths
+    let fp_input = {
+        let mut s = sid.clone();
+        let mut edits: Vec<&str> = session.recent_edits.keys().map(|k| k.as_str()).collect();
+        edits.sort();
+        edits.truncate(5);
+        for p in edits {
+            s.push('|');
+            s.push_str(p);
+        }
+        s
+    };
+    let fingerprint = {
+        use std::collections::hash_map::DefaultHasher;
+        use std::hash::{Hash, Hasher};
+        let mut h = DefaultHasher::new();
+        fp_input.hash(&mut h);
+        format!("{:x}", h.finish())
+    };
+
+    // Locate compacts directory
+    let compact_dir = {
+        let base = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+        std::path::PathBuf::from(base)
+            .join(".local")
+            .join("share")
+            .join("panda")
+            .join("compacts")
+    };
+    std::fs::create_dir_all(&compact_dir).ok();
+
+    // Deduplication: check most recent compact for this session
+    if let Ok(entries) = std::fs::read_dir(&compact_dir) {
+        let prefix = format!("{}-", sid);
+        let mut matches: Vec<std::path::PathBuf> = entries
+            .filter_map(|e| e.ok())
+            .map(|e| e.path())
+            .filter(|p| {
+                p.file_name()
+                    .and_then(|n| n.to_str())
+                    .map(|n| n.starts_with(&prefix) && n.ends_with(".md"))
+                    .unwrap_or(false)
+            })
+            .collect();
+        matches.sort();
+        if let Some(last) = matches.last() {
+            if let Ok(content) = std::fs::read_to_string(last) {
+                let fp_line = format!("<!-- fingerprint: {} -->", fingerprint);
+                if content.contains(&fp_line) {
+                    print!("{{\"suppressOutput\": true}}");
+                    return Ok(());
+                }
+            }
+        }
+    }
+
+    // Write the compact digest
+    let ts = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let filename = compact_dir.join(format!("{}-{}.md", sid, ts));
+    let content = format!("<!-- fingerprint: {} -->\n{}", fingerprint, digest.markdown);
+    std::fs::write(&filename, &content)
+        .unwrap_or_else(|e| eprintln!("[panda] compact capture write error: {}", e));
+
+    print!("{{\"suppressOutput\": true}}");
+    Ok(())
+}
+
+fn process_compact_restore() -> Result<()> {
+    let sid = crate::session::session_id();
+
+    let compact_dir = {
+        let base = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+        std::path::PathBuf::from(base)
+            .join(".local")
+            .join("share")
+            .join("panda")
+            .join("compacts")
+    };
+
+    let Ok(entries) = std::fs::read_dir(&compact_dir) else {
+        return Ok(());
+    };
+
+    let prefix = format!("{}-", sid);
+    let mut matches: Vec<std::path::PathBuf> = entries
+        .filter_map(|e| e.ok())
+        .map(|e| e.path())
+        .filter(|p| {
+            p.file_name()
+                .and_then(|n| n.to_str())
+                .map(|n| n.starts_with(&prefix) && n.ends_with(".md"))
+                .unwrap_or(false)
+        })
+        .collect();
+
+    if matches.is_empty() {
+        return Ok(());
+    }
+
+    matches.sort();
+    let latest = matches.last().unwrap();
+
+    let content = match std::fs::read_to_string(latest) {
+        Ok(c) => c,
+        Err(_) => return Ok(()),
+    };
+
+    // Strip the fingerprint comment line
+    let body: String = content
+        .lines()
+        .filter(|l| !l.starts_with("<!-- fingerprint:"))
+        .collect::<Vec<&str>>()
+        .join("\n");
+
+    let response = serde_json::json!({ "additionalContext": body });
+    print!("{}", response);
+    Ok(())
+}
+
+// ── Tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {
