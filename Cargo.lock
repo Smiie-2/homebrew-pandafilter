@@ -2085,6 +2085,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "fastembed",
+ "hf-hub",
  "once_cell",
  "openvino",
  "openvino-sys",

@@ -57,7 +57,8 @@ static MODEL_NAME: OnceCell<String> = OnceCell::new();
 /// Set the embedding model name to use. Must be called before the first summarization.
 /// First call wins (subsequent calls are no-ops).
 /// Valid values: "AllMiniLML6V2" (default, ~90MB), "AllMiniLML12V2" (~120MB),
-/// "BGESmallENV15" (~130MB, better quality), "MxbaiEmbedLargeV1" (~670MB, best quality).
+/// "BGESmallENV15" (~130MB, better quality), "MxbaiEmbedLargeV1" (~670MB, best quality),
+/// "SnowflakeArcticEmbedXS" (~90MB, 6-layer BERT, 384-dim, MTEB-tuned).
 pub fn set_model_name(name: &str) {
     let _ = MODEL_NAME.set(name.to_string());
 }
@@ -281,6 +282,19 @@ fn load_model(name: &str) -> anyhow::Result<fastembed::TextEmbedding> {
         eprintln!("[panda] this may take a minute. future runs are instant.");
     }
 
+    let cache_dir = std::env::var("HOME")
+        .map(|h| std::path::PathBuf::from(h).join(".local/share/ccr/fastembed"))
+        .unwrap_or_else(|_| std::path::PathBuf::from(".fastembed_cache"));
+
+    // Models not in fastembed's built-in EmbeddingModel enum take the
+    // user-defined path: download files into the same HF-cache layout the
+    // built-in path uses, then load them as raw bytes.
+    if let Some((repo, onnx_subpath, max_length, pooling)) = user_defined_info(name) {
+        let model = load_user_defined(repo, onnx_subpath, max_length, pooling, &cache_dir)?;
+        mark_model_cached(name);
+        return Ok(model);
+    }
+
     let embedding_model = match name {
         "AllMiniLML6V2Q" => EmbeddingModel::AllMiniLML6V2Q,
         "AllMiniLML12V2" => EmbeddingModel::AllMiniLML12V2,
@@ -291,10 +305,6 @@ fn load_model(name: &str) -> anyhow::Result<fastembed::TextEmbedding> {
         "MxbaiEmbedLargeV1Q" => EmbeddingModel::MxbaiEmbedLargeV1Q,
         _ => EmbeddingModel::AllMiniLML6V2,
     };
-
-    let cache_dir = std::env::var("HOME")
-        .map(|h| std::path::PathBuf::from(h).join(".local/share/ccr/fastembed"))
-        .unwrap_or_else(|_| std::path::PathBuf::from(".fastembed_cache"));
 
     let providers = select_execution_providers();
 
@@ -307,6 +317,62 @@ fn load_model(name: &str) -> anyhow::Result<fastembed::TextEmbedding> {
 
     mark_model_cached(name);
     Ok(model)
+}
+
+/// User-defined (non-fastembed-builtin) model registry.
+/// Returns (HF repo, ONNX subpath, max_seq_len, pooling).
+fn user_defined_info(name: &str) -> Option<(&'static str, &'static str, usize, fastembed::Pooling)> {
+    match name {
+        "SnowflakeArcticEmbedXS" => Some((
+            "Snowflake/snowflake-arctic-embed-xs",
+            "onnx/model.onnx",
+            512,
+            fastembed::Pooling::Cls,
+        )),
+        _ => None,
+    }
+}
+
+fn load_user_defined(
+    repo: &str,
+    onnx_subpath: &str,
+    max_length: usize,
+    pooling: fastembed::Pooling,
+    cache_dir: &std::path::Path,
+) -> anyhow::Result<fastembed::TextEmbedding> {
+    use fastembed::{
+        InitOptionsUserDefined, TextEmbedding, TokenizerFiles, UserDefinedEmbeddingModel,
+    };
+    use hf_hub::api::sync::ApiBuilder;
+
+    let api = ApiBuilder::new()
+        .with_cache_dir(cache_dir.to_path_buf())
+        .with_progress(false)
+        .build()?;
+    let model_repo = api.model(repo.to_string());
+
+    let read = |rel: &str| -> anyhow::Result<Vec<u8>> {
+        let path = model_repo
+            .get(rel)
+            .map_err(|e| anyhow::anyhow!("hf-hub fetch {rel}: {e}"))?;
+        Ok(std::fs::read(path)?)
+    };
+
+    let onnx_file = read(onnx_subpath)?;
+    let tokenizer_files = TokenizerFiles {
+        tokenizer_file: read("tokenizer.json")?,
+        config_file: read("config.json")?,
+        special_tokens_map_file: read("special_tokens_map.json")?,
+        tokenizer_config_file: read("tokenizer_config.json")?,
+    };
+
+    let model = UserDefinedEmbeddingModel::new(onnx_file, tokenizer_files).with_pooling(pooling);
+
+    let opts = InitOptionsUserDefined::new()
+        .with_execution_providers(select_execution_providers())
+        .with_max_length(max_length);
+
+    Ok(TextEmbedding::try_new_from_user_defined(model, opts)?)
 }
 
 fn get_model() -> anyhow::Result<&'static fastembed::TextEmbedding> {

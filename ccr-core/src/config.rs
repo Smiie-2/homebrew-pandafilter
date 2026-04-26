@@ -76,6 +76,7 @@ pub struct GlobalConfig {
     ///   - "AllMiniLML12V2"    (~120MB)
     ///   - "BGESmallENV15"     (~130MB, stronger retrieval quality, 384-dim)
     ///   - "MxbaiEmbedLargeV1" (~670MB, best quality, 1024-dim)
+    ///   - "SnowflakeArcticEmbedXS" (~90MB, 6-layer BERT, 384-dim, MTEB-tuned)
     /// First call wins — changing this requires restarting the process.
     #[serde(default = "default_bert_model")]
     pub bert_model: String,
