@@ -204,6 +204,9 @@ static MODEL_CACHE: OnceCell<fastembed::TextEmbedding> = OnceCell::new();
 static OV_EMBEDDER: OnceCell<Option<ov_embed::OvEmbedder>> = OnceCell::new();
 
 fn get_ov_embedder() -> Option<&'static ov_embed::OvEmbedder> {
+    if ov_embed::is_degraded() {
+        return None;
+    }
     OV_EMBEDDER
         .get_or_init(|| {
             if effective_exec_mode() == "cpu" {
@@ -382,7 +385,12 @@ fn embed_and_normalize(
     texts: Vec<&str>,
 ) -> anyhow::Result<Vec<Vec<f32>>> {
     if let Some(ov) = get_ov_embedder() {
-        return ov.embed(&texts);
+        match ov.embed(&texts) {
+            Ok(v) => return Ok(v),
+            // OvEmbedder marked DEGRADED internally and printed a one-time
+            // notice; fall through to fastembed CPU for this and future calls.
+            Err(_) => {}
+        }
     }
     let mut embeddings = model.embed(texts, None)?;
     for emb in &mut embeddings {

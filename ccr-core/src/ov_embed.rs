@@ -1,7 +1,27 @@
 use anyhow::{Context, Result};
-use openvino::{Core, DeviceType, ElementType, PartialShape, Shape, Tensor};
+use openvino::{
+    Core, DeviceType, ElementType, PartialShape, PropertyKey, RwPropertyKey, Shape, Tensor,
+};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::Mutex;
+use std::thread;
 use tokenizers::Tokenizer;
+
+// Process-wide flag: once an OvEmbedder call hits a hard NPU error after a
+// retry, this flips to true and `is_degraded()` makes summarizer.rs skip the
+// NPU path for the rest of the process. Reset only by restarting panda.
+static DEGRADED: AtomicBool = AtomicBool::new(false);
+
+pub fn is_degraded() -> bool {
+    DEGRADED.load(Ordering::Relaxed)
+}
+
+fn mark_degraded(reason: &str) {
+    if !DEGRADED.swap(true, Ordering::Relaxed) {
+        eprintln!("[panda] NPU embedder failed ({reason}); falling back to CPU");
+    }
+}
 
 // openvino-sys loads `libopenvino_c.so` (the C API shim), not `libopenvino.so`.
 const OV_C_LIB_CANDIDATES: &[&str] = &[
@@ -83,14 +103,22 @@ pub fn find_fastembed_onnx(
 
 pub struct OvEmbedder {
     _core: Core,
-    compiled: std::sync::Mutex<openvino::CompiledModel>,
+    // Compiled model is kept alive but the InferRequests are pre-allocated up
+    // front; we never call create_infer_request again at runtime.
+    _compiled: openvino::CompiledModel,
+    // Pool of pre-allocated requests. Drained on each embed() call, refilled
+    // with the same requests after parallel work completes. Size matches the
+    // NPU's reported OPTIMAL_NUMBER_OF_INFER_REQUESTS (typically 4 on Meteor
+    // Lake's 2-tile NPU 3720).
+    requests: Mutex<Vec<openvino::InferRequest>>,
     tokenizer: Tokenizer,
     seq_len: usize,
     hidden_size: usize,
+    has_token_type: bool,
 }
 
-// SAFETY: OpenVINO documents CompiledModel as thread-safe.
-// InferRequest is created per-call and never shared.
+// SAFETY: openvino-rs marks both CompiledModel (Send) and InferRequest
+// (Send + Sync) safe; the Mutex around the request pool guards refill semantics.
 unsafe impl Send for OvEmbedder {}
 unsafe impl Sync for OvEmbedder {}
 
@@ -103,11 +131,40 @@ impl OvEmbedder {
 
         let mut core = Core::new().context("OpenVINO Core::new() failed")?;
 
+        // Persist compiled-model blob between process invocations. NPU
+        // compile is multi-second; cache turns subsequent starts into <500 ms.
+        // The plugin invalidates the cache automatically on driver/OV upgrade.
+        let cache_dir = std::env::var("HOME")
+            .map(|h| PathBuf::from(h).join(".cache/panda/openvino"))
+            .unwrap_or_else(|_| PathBuf::from(".panda-openvino-cache"));
+        if let Err(e) = std::fs::create_dir_all(&cache_dir) {
+            eprintln!(
+                "[panda] could not create NPU cache dir {}: {} (continuing without cache)",
+                cache_dir.display(),
+                e
+            );
+        } else if let Some(s) = cache_dir.to_str() {
+            if let Err(e) = core.set_property(&DeviceType::NPU, &RwPropertyKey::CacheDir, s) {
+                eprintln!("[panda] could not enable NPU model cache: {e:?}");
+            }
+        }
+
+        // PERFORMANCE_HINT=THROUGHPUT tells the NPU plugin to optimise for
+        // multiple in-flight infer requests rather than single-call latency.
+        // Without this hint, OPTIMAL_NUMBER_OF_INFER_REQUESTS often reports 1
+        // and the device sits idle between sync calls.
+        if let Err(e) =
+            core.set_property(&DeviceType::NPU, &RwPropertyKey::HintPerformanceMode, "THROUGHPUT")
+        {
+            eprintln!("[panda] could not set NPU PERFORMANCE_HINT: {e:?}");
+        }
+
         let mut model = core
             .read_model_from_file(onnx_path.to_str().unwrap(), "")
             .context("Failed to read ONNX model into OpenVINO")?;
 
-        // Reshape all inputs to static [1, seq_len] so the NPU can compile them.
+        // NPU plugin requires static shapes. Batch=1 + parallel async requests
+        // is the canonical NPU recipe; batched models on NPU regress.
         let n_inputs = model.get_inputs_len()?;
         let static_shape = PartialShape::new_static(2, &[1, seq_len as i64])?;
         for i in 0..n_inputs {
@@ -116,35 +173,135 @@ impl OvEmbedder {
         }
 
         eprint!("[panda] compiling model for NPU (one-time per session)...");
-        let compiled = core
+        let mut compiled = core
             .compile_model(&model, DeviceType::NPU)
             .context("NPU compile_model failed")?;
         eprintln!(" done");
 
-        // Infer hidden_size from last dimension of output 0
         let out_node = compiled.get_output_by_index(0)?;
         let shape = out_node.get_shape()?;
         let dims = shape.get_dimensions();
         let hidden_size = dims.last().copied().unwrap_or(384) as usize;
+
+        let has_token_type = compiled.get_input_size()? > 2;
+
+        // Query the optimal in-flight infer-request count. The NPU plugin
+        // returns 4 on Meteor Lake; clamp to [1, 8] as a sanity bound.
+        let pool_size = compiled
+            .get_property(&PropertyKey::OptimalNumberOfInferRequests)
+            .ok()
+            .and_then(|s| s.trim().parse::<usize>().ok())
+            .unwrap_or(4)
+            .clamp(1, 8);
+
+        let mut requests = Vec::with_capacity(pool_size);
+        for _ in 0..pool_size {
+            requests.push(
+                compiled
+                    .create_infer_request()
+                    .context("create_infer_request failed")?,
+            );
+        }
+        eprintln!("[panda] NPU infer-request pool size: {}", pool_size);
 
         let tokenizer = Tokenizer::from_file(tokenizer_path)
             .map_err(|e| anyhow::anyhow!("tokenizer load: {e}"))?;
 
         Ok(OvEmbedder {
             _core: core,
-            compiled: std::sync::Mutex::new(compiled),
+            _compiled: compiled,
+            requests: Mutex::new(requests),
             tokenizer,
             seq_len,
             hidden_size,
+            has_token_type,
         })
     }
 
     /// Embed texts and return L2-normalised vectors (one per input).
+    /// Runs the request pool in parallel — N worker threads, each holding one
+    /// dedicated InferRequest, processing texts via an atomic work counter.
     pub fn embed(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>> {
-        texts.iter().map(|t| self.embed_one(t)).collect()
+        if texts.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        // Drain the request pool. Threads will return their request at the
+        // end; we refill the pool before returning.
+        let owned_reqs: Vec<openvino::InferRequest> = {
+            let mut guard = self.requests.lock().unwrap();
+            std::mem::take(&mut *guard)
+        };
+        if owned_reqs.is_empty() {
+            return Err(anyhow::anyhow!("NPU request pool empty"));
+        }
+
+        let next = AtomicUsize::new(0);
+        let local_degraded = AtomicBool::new(false);
+        let outputs: Vec<Mutex<Option<Vec<f32>>>> =
+            (0..texts.len()).map(|_| Mutex::new(None)).collect();
+
+        let returned = thread::scope(|s| -> Vec<openvino::InferRequest> {
+            let handles: Vec<_> = owned_reqs
+                .into_iter()
+                .map(|mut req| {
+                    let next_ref = &next;
+                    let degraded_ref = &local_degraded;
+                    let outputs_ref = &outputs;
+                    s.spawn(move || -> openvino::InferRequest {
+                        loop {
+                            if degraded_ref.load(Ordering::Relaxed) {
+                                break;
+                            }
+                            let idx = next_ref.fetch_add(1, Ordering::Relaxed);
+                            if idx >= texts.len() {
+                                break;
+                            }
+                            let result = match self.embed_one_with(&mut req, texts[idx]) {
+                                Ok(v) => Some(v),
+                                Err(_) => self.embed_one_with(&mut req, texts[idx]).ok(),
+                            };
+                            match result {
+                                Some(v) => *outputs_ref[idx].lock().unwrap() = Some(v),
+                                None => {
+                                    degraded_ref.store(true, Ordering::Relaxed);
+                                    break;
+                                }
+                            }
+                        }
+                        req
+                    })
+                })
+                .collect();
+            handles.into_iter().map(|h| h.join().unwrap()).collect()
+        });
+
+        // Refill the pool whether we succeeded or not — the requests are still
+        // valid even after a single failed infer.
+        *self.requests.lock().unwrap() = returned;
+
+        if local_degraded.load(Ordering::Relaxed) {
+            mark_degraded("infer error after retry");
+            return Err(anyhow::anyhow!("NPU embed failed; using CPU"));
+        }
+
+        let mut out = Vec::with_capacity(texts.len());
+        for slot in outputs {
+            match slot.into_inner().unwrap() {
+                Some(v) => out.push(v),
+                None => return Err(anyhow::anyhow!("NPU embed produced no output for index")),
+            }
+        }
+        Ok(out)
     }
 
-    fn embed_one(&self, text: &str) -> Result<Vec<f32>> {
+    /// Run one tokenise → infer → mean-pool → normalise pipeline against the
+    /// supplied dedicated request. Used by the worker loop.
+    fn embed_one_with(
+        &self,
+        req: &mut openvino::InferRequest,
+        text: &str,
+    ) -> Result<Vec<f32>> {
         let enc = self
             .tokenizer
             .encode(text, true)
@@ -167,25 +324,18 @@ impl OvEmbedder {
         let mut mask_tensor = Tensor::new(ElementType::I64, &shape)?;
         mask_tensor.get_data_mut::<i64>()?.copy_from_slice(&mask_data);
 
-        let mut compiled = self.compiled.lock().unwrap();
-        let mut req = compiled.create_infer_request()?;
         req.set_tensor("input_ids", &id_tensor)?;
         req.set_tensor("attention_mask", &mask_tensor)?;
-
-        // token_type_ids is optional — ignore errors if the model doesn't have it
-        if compiled.get_input_size()? > 2 {
+        if self.has_token_type {
             let tt_tensor = Tensor::new(ElementType::I64, &shape)?;
             let _ = req.set_tensor("token_type_ids", &tt_tensor);
         }
-        drop(compiled); // unlock before infer so it's not held during potentially slow inference
 
         req.infer()?;
 
-        // Retrieve last_hidden_state [1, seq_len, hidden_size] — output 0
         let out = req.get_output_tensor_by_index(0)?;
         let data: &[f32] = out.get_data::<f32>()?;
 
-        // Mean-pool over non-padding positions then L2-normalize
         let mut pooled = vec![0.0f32; self.hidden_size];
         let mut count = 0usize;
         for token_idx in 0..actual_len {
