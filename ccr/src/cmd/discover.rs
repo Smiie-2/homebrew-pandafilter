@@ -254,8 +254,13 @@ fn run_db_report() -> anyhow::Result<()> {
         .unwrap_or(0);
     let cutoff = now_secs.saturating_sub(30 * 86400) as i64;
 
-    // Commands with ≥5 runs, meaningful input, and <35% weighted savings
-    // Exclude internal pseudo-commands like (read-delta), (pipeline), etc.
+    // Commands with ≥5 runs, meaningful input, and <35% weighted savings.
+    // Exclude:
+    //   - Internal pseudo-commands like (read-delta), (pipeline), etc.
+    //   - Inherently uncompressable commands: wc, echo, printf, head, tail, ps, date,
+    //     pwd, whoami, which, type, true, false, sleep, cat — these produce 1-5 line
+    //     outputs with no noise to remove; low savings is expected, not actionable.
+    //   - '#' comment-prefixed compound commands (attribution artifact)
     let mut stmt = conn.prepare(
         "SELECT command,
                 COUNT(*) as runs,
@@ -264,6 +269,11 @@ fn run_db_report() -> anyhow::Result<()> {
          FROM records
          WHERE timestamp_secs >= ?1
            AND command NOT LIKE '(%'
+           AND command NOT IN (
+               'wc','echo','printf','head','tail','ps','date','pwd','whoami',
+               'which','type','true','false','sleep','cat','#','ls','expr',
+               'test','[','kill','wait','cd','exit','return','unset','set'
+           )
            AND input_tokens > 0
          GROUP BY command
          HAVING runs >= 5
@@ -305,12 +315,26 @@ fn run_db_report() -> anyhow::Result<()> {
         "COMMAND", "RUNS", "TOKENS IN", "SAVINGS", "OPPORTUNITY");
     println!("{}", "─".repeat(62));
 
+    // Per-command achievable savings targets — based on handler capabilities.
+    // Used to compute realistic opportunity rather than a flat 60% for everything.
+    let target_map: std::collections::HashMap<&str, f64> = [
+        ("cargo", 0.87), ("curl", 0.90), ("git", 0.80), ("docker", 0.85),
+        ("docker-compose", 0.85), ("npm", 0.85), ("pnpm", 0.85), ("yarn", 0.85),
+        ("ls", 0.70), ("grep", 0.75), ("rg", 0.75), ("find", 0.75),
+        ("kubectl", 0.75), ("terraform", 0.70), ("pytest", 0.80), ("jest", 0.75),
+        ("gh", 0.65), ("make", 0.60), ("tsc", 0.70), ("go", 0.65),
+        ("pip", 0.60), ("brew", 0.65), ("python", 0.55), ("sed", 0.50),
+        ("ssh", 0.50), ("source", 0.45),
+    ].iter().cloned().collect();
+
     for row in &rows {
         let savings_pct = if row.total_in > 0 {
             (row.total_in - row.total_out) as f64 / row.total_in as f64 * 100.0
         } else { 0.0 };
 
-        let potential = ((row.total_in as f64 * 0.60) - (row.total_in - row.total_out) as f64).max(0.0) as usize;
+        // Use per-command target if known; fall back to 60% generic.
+        let target = target_map.get(row.command.as_str()).copied().unwrap_or(0.60);
+        let potential = ((row.total_in as f64 * target) - (row.total_in - row.total_out) as f64).max(0.0) as usize;
         let bar_len = ((1.0 - savings_pct / 100.0) * 10.0) as usize;
         let bar = "█".repeat(bar_len.min(10));
 
