@@ -266,7 +266,7 @@ pub fn run_index(repo_root: &Path, index_parent: &Path) -> Result<()> {
         head_hash: head.clone(),
         repo_root: repo_root.to_string_lossy().to_string(),
         schema_version: graph::SCHEMA_VERSION.to_string(),
-        embedding_model: "AllMiniLML6V2".to_string(),
+        embedding_model: crate::summarizer::current_model_name().to_string(),
         indexed_at: epoch,
     };
 

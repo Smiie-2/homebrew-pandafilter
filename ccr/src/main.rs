@@ -203,6 +203,7 @@ fn main() {
     // set_model_name is no-op after first call, so this must run before any summarization.
     if let Ok(config) = config_loader::load_config() {
         panda_core::summarizer::set_model_name(&config.global.bert_model);
+        panda_core::summarizer::set_execution_mode(&config.global.execution_provider);
         panda_core::summarizer::set_extra_keep_patterns(config.global.hard_keep_patterns.clone());
     }
 

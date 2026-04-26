@@ -42,6 +42,49 @@ fi
 echo "Building PandaFilter from source (this takes ~1 min on first run)..."
 cargo install --git "$REPO_URL" --bin panda --locked 2>&1
 
+# ── Fetch ONNX Runtime shared library (CPU baseline) ─────────────────────────
+# PandaFilter uses fastembed → ort with `load-dynamic`, so a libonnxruntime.so
+# must be discoverable at runtime. We drop a CPU build into ~/.local/share/ccr/
+# onnxruntime/. Users wanting NPU acceleration can replace this file with an
+# OpenVINO-EP-enabled build, or set ORT_DYLIB_PATH.
+ORT_DIR="$HOME/.local/share/ccr/onnxruntime"
+ORT_LIB="$ORT_DIR/libonnxruntime.so"
+ORT_VER="1.20.1"
+if [ ! -f "$ORT_LIB" ]; then
+  ARCH="$(uname -m)"
+  case "$ARCH" in
+    x86_64) ORT_TARBALL="onnxruntime-linux-x64-${ORT_VER}.tgz" ;;
+    aarch64) ORT_TARBALL="onnxruntime-linux-aarch64-${ORT_VER}.tgz" ;;
+    *) ORT_TARBALL="" ;;
+  esac
+  if [ -n "$ORT_TARBALL" ]; then
+    echo "Downloading ONNX Runtime ${ORT_VER} (CPU)..."
+    mkdir -p "$ORT_DIR"
+    TMPDIR_ORT="$(mktemp -d)"
+    if curl -fsSL -o "$TMPDIR_ORT/$ORT_TARBALL" \
+        "https://github.com/microsoft/onnxruntime/releases/download/v${ORT_VER}/${ORT_TARBALL}"; then
+      tar -xzf "$TMPDIR_ORT/$ORT_TARBALL" -C "$TMPDIR_ORT"
+      ORT_SUBDIR="$(dirname "$ORT_TARBALL" .tgz)"
+      ORT_EXTRACTED="$TMPDIR_ORT/${ORT_TARBALL%.tgz}"
+      cp "$ORT_EXTRACTED/lib/libonnxruntime.so."* "$ORT_DIR/" 2>/dev/null || true
+      ln -sf "$(basename "$(ls -1 "$ORT_DIR"/libonnxruntime.so.* | head -1)")" "$ORT_LIB"
+      echo "  → installed $ORT_LIB"
+    else
+      echo "  → could not download ONNX Runtime (offline?). Set ORT_DYLIB_PATH manually."
+    fi
+    rm -rf "$TMPDIR_ORT"
+  fi
+fi
+
+# Hint about NPU on Intel Meteor Lake / Core Ultra hardware
+if [ -e /dev/accel/accel0 ] && grep -qi "Core(TM) Ultra" /proc/cpuinfo 2>/dev/null; then
+  echo ""
+  echo "Intel NPU detected (/dev/accel/accel0). For NPU acceleration:"
+  echo "  1. Install OpenVINO runtime + an OpenVINO-EP-enabled libonnxruntime.so."
+  echo "  2. Replace $ORT_LIB with that build, or export ORT_DYLIB_PATH=/path/to/libonnxruntime.so."
+  echo "  3. Set execution_provider = \"npu\" in panda.toml (or env PANDA_NPU=npu)."
+fi
+
 # ── Ensure ~/.cargo/bin is on PATH ────────────────────────────────────────────
 
 add_to_path() {

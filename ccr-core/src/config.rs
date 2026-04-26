@@ -70,11 +70,25 @@ pub struct GlobalConfig {
     /// Example: ["OOMKilled", "timeout", "deadline exceeded"]
     #[serde(default)]
     pub hard_keep_patterns: Vec<String>,
-    /// BERT embedding model to use for semantic summarization.
-    /// Options: "AllMiniLML6V2" (default, ~90MB), "AllMiniLML12V2" (~120MB).
+    /// Embedding model to use for semantic summarization.
+    /// Options:
+    ///   - "AllMiniLML6V2"     (default, ~90MB)
+    ///   - "AllMiniLML12V2"    (~120MB)
+    ///   - "BGESmallENV15"     (~130MB, stronger retrieval quality, 384-dim)
+    ///   - "MxbaiEmbedLargeV1" (~670MB, best quality, 1024-dim)
     /// First call wins — changing this requires restarting the process.
     #[serde(default = "default_bert_model")]
     pub bert_model: String,
+    /// ONNX Runtime execution provider for embedding inference.
+    /// Options:
+    ///   - "auto" (default) — use Intel NPU if /dev/accel/accel0 and an
+    ///     OpenVINO-EP-enabled libonnxruntime.so are both present, else CPU.
+    ///   - "cpu"            — force CPU.
+    ///   - "npu"            — require Intel NPU; warn and fall back to CPU
+    ///                        if prereqs missing.
+    /// Override at runtime with the env var `PANDA_NPU=auto|cpu|npu`.
+    #[serde(default = "default_execution_provider")]
+    pub execution_provider: String,
     /// Commands whose output represents persistent system state.
     /// These get full-content storage in SessionEntry (no 4000-char cap),
     /// enabling accurate line-level delta across long state outputs.
@@ -115,6 +129,10 @@ fn default_bert_model() -> String {
     "AllMiniLML6V2".to_string()
 }
 
+fn default_execution_provider() -> String {
+    "auto".to_string()
+}
+
 fn default_state_commands() -> Vec<String> {
     ["git", "kubectl", "ps", "ls", "df", "docker"]
         .iter()
@@ -133,6 +151,7 @@ impl Default for GlobalConfig {
             deduplicate_lines: true,
             hard_keep_patterns: Vec::new(),
             bert_model: default_bert_model(),
+            execution_provider: default_execution_provider(),
             state_commands: default_state_commands(),
             cost_per_million_tokens: None,
             input_char_ceiling: default_input_char_ceiling(),

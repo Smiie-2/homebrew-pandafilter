@@ -37,7 +37,17 @@ brew install pandafilter
 curl -fsSL https://raw.githubusercontent.com/AssafWoo/homebrew-pandafilter/main/install.sh | bash
 ```
 
-> **First run:** PandaFilter downloads the BERT model (~90 MB, `all-MiniLM-L6-v2`) from HuggingFace and caches it at `~/.cache/huggingface/`. Subsequent runs are instant.
+> **First run:** PandaFilter downloads the embedding model (default `all-MiniLM-L6-v2`, ~90 MB) from HuggingFace and caches it under `~/.local/share/ccr/fastembed/`. The Linux installer also drops a CPU `libonnxruntime.so` into `~/.local/share/ccr/onnxruntime/`. Subsequent runs are instant.
+>
+> **Choose a stronger model** by setting `bert_model` in `panda.toml`:
+>
+> | Value | Size | Notes |
+> |---|---|---|
+> | `AllMiniLML6V2` (default) | ~90 MB | 384-dim, fastest |
+> | `BGESmallENV15` | ~130 MB | 384-dim, stronger retrieval quality |
+> | `MxbaiEmbedLargeV1` | ~670 MB | 1024-dim, best quality |
+>
+> **Intel NPU acceleration (Meteor Lake / Core Ultra):** Set `execution_provider = "npu"` in `panda.toml` (or `PANDA_NPU=npu` in the env). Requires an OpenVINO-EP-enabled `libonnxruntime.so` — drop it at `~/.local/share/ccr/onnxruntime/libonnxruntime.so` (replacing the CPU one) or set `ORT_DYLIB_PATH=/path/to/libonnxruntime.so`. Without those, `auto` (the default) silently uses CPU; `npu` warns once and falls back.
 
 Then wire it in — one command installs for every AI agent you have:
 

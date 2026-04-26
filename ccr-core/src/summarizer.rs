@@ -52,9 +52,10 @@ fn effective_critical_pattern() -> Regex {
 
 static MODEL_NAME: OnceCell<String> = OnceCell::new();
 
-/// Set the BERT model name to use. Must be called before the first summarization.
+/// Set the embedding model name to use. Must be called before the first summarization.
 /// First call wins (subsequent calls are no-ops).
-/// Valid values: "AllMiniLML6V2" (default), "AllMiniLML12V2".
+/// Valid values: "AllMiniLML6V2" (default, ~90MB), "AllMiniLML12V2" (~120MB),
+/// "BGESmallENV15" (~130MB, better quality), "MxbaiEmbedLargeV1" (~670MB, best quality).
 pub fn set_model_name(name: &str) {
     let _ = MODEL_NAME.set(name.to_string());
 }
@@ -63,13 +64,137 @@ fn get_model_name() -> &'static str {
     MODEL_NAME.get().map(|s| s.as_str()).unwrap_or("AllMiniLML6V2")
 }
 
+/// Public read accessor — used by callers (e.g. the focus indexer) that want
+/// to record which model produced a given set of embeddings.
+pub fn current_model_name() -> &'static str {
+    get_model_name()
+}
+
+// ── Execution provider selection (CPU / Intel NPU) ────────────────────────────
+
+static EXEC_MODE: OnceCell<String> = OnceCell::new();
+
+/// Set the execution-provider mode. Valid values: "auto" (default), "cpu", "npu".
+/// Read also from env var `PANDA_NPU` (env wins over the config setter).
+pub fn set_execution_mode(mode: &str) {
+    let _ = EXEC_MODE.set(mode.to_string());
+}
+
+fn effective_exec_mode() -> String {
+    if let Ok(v) = std::env::var("PANDA_NPU") {
+        let t = v.trim();
+        if !t.is_empty() {
+            return t.to_lowercase();
+        }
+    }
+    EXEC_MODE
+        .get()
+        .map(|s| s.to_lowercase())
+        .unwrap_or_else(|| "auto".to_string())
+}
+
+/// Candidate paths for an OpenVINO-EP-enabled `libonnxruntime.so`.
+/// Caller is expected to set `ORT_DYLIB_PATH` if none of these match.
+const ORT_DYLIB_CANDIDATES: &[&str] = &[
+    "/usr/lib/x86_64-linux-gnu/libonnxruntime.so",
+    "/usr/local/lib/libonnxruntime.so",
+    "/opt/intel/openvino/runtime/lib/intel64/libonnxruntime.so",
+];
+
+fn ort_dylib_resolved() -> bool {
+    if std::env::var("ORT_DYLIB_PATH")
+        .map(|v| !v.trim().is_empty())
+        .unwrap_or(false)
+    {
+        return true;
+    }
+    let home_path = std::env::var("HOME")
+        .ok()
+        .map(|h| format!("{}/.local/share/ccr/onnxruntime/libonnxruntime.so", h));
+    let extra: Vec<String> = home_path.into_iter().collect();
+    let candidates = ORT_DYLIB_CANDIDATES
+        .iter()
+        .map(|s| s.to_string())
+        .chain(extra.into_iter());
+    for cand in candidates {
+        if std::path::Path::new(&cand).exists() {
+            // Set for fastembed/ort to pick up before first session creation.
+            // SAFETY: single-threaded init path before any fastembed call.
+            unsafe {
+                std::env::set_var("ORT_DYLIB_PATH", &cand);
+            }
+            return true;
+        }
+    }
+    false
+}
+
+fn npu_device_present() -> bool {
+    std::path::Path::new("/dev/accel/accel0").exists()
+}
+
+/// Compute the execution-provider list passed into `InitOptions::with_execution_providers`.
+/// Returns an empty Vec for the CPU path.
+///
+/// Modes:
+/// - `cpu`  → empty Vec.
+/// - `npu`  → OpenVINO/NPU EP (returns empty Vec if prereqs missing, with a warning).
+/// - `auto` → OpenVINO/NPU EP iff both `/dev/accel/accel0` and an ORT dylib are found.
+fn select_execution_providers() -> Vec<ort::execution_providers::ExecutionProviderDispatch> {
+    use ort::execution_providers::OpenVINOExecutionProvider;
+
+    // Always probe for an ORT shared library — the `load-dynamic` build of `ort`
+    // needs `ORT_DYLIB_PATH` set (or `libonnxruntime.so` on the loader path) to
+    // initialize at all, regardless of which execution provider we pick.
+    let have_lib = ort_dylib_resolved();
+
+    let mode = effective_exec_mode();
+    if mode == "cpu" {
+        return Vec::new();
+    }
+
+    let want_npu = mode == "npu";
+    let have_dev = npu_device_present();
+
+    if !have_dev || !have_lib {
+        if want_npu {
+            eprintln!(
+                "[panda] NPU requested but {} missing — falling back to CPU",
+                if !have_dev {
+                    "/dev/accel/accel0"
+                } else {
+                    "OpenVINO-enabled libonnxruntime.so (set ORT_DYLIB_PATH)"
+                }
+            );
+        }
+        return Vec::new();
+    }
+
+    // Default `error_on_failure = false` — ORT silently falls back to CPU
+    // if the OpenVINO EP cannot initialize at session-creation time.
+    vec![OpenVINOExecutionProvider::default()
+        .with_device_type("NPU")
+        .build()]
+}
+
 // ── Cached model ──────────────────────────────────────────────────────────────
 
 static MODEL_CACHE: OnceCell<fastembed::TextEmbedding> = OnceCell::new();
 
-/// Sentinel file written after a successful model load/download.
-/// Its presence means the model files are already on disk.
-fn bert_sentinel() -> Option<std::path::PathBuf> {
+/// Per-model sentinel file written after a successful model load/download.
+/// Its presence means the model files are already on disk for that model.
+/// Legacy `.bert_ready` is also accepted on first run for the default L6 model.
+fn model_sentinel(name: &str) -> Option<std::path::PathBuf> {
+    std::env::var("HOME").ok().map(|h| {
+        std::path::PathBuf::from(h)
+            .join(".local")
+            .join("share")
+            .join("ccr")
+            .join(format!(".model_ready_{}", name))
+    })
+}
+
+fn legacy_sentinel() -> Option<std::path::PathBuf> {
     std::env::var("HOME").ok().map(|h| {
         std::path::PathBuf::from(h)
             .join(".local")
@@ -79,12 +204,21 @@ fn bert_sentinel() -> Option<std::path::PathBuf> {
     })
 }
 
-fn bert_is_cached() -> bool {
-    bert_sentinel().map(|p| p.exists()).unwrap_or(false)
+fn model_is_cached(name: &str) -> bool {
+    let new_ok = model_sentinel(name)
+        .map(|p| p.exists())
+        .unwrap_or(false);
+    if new_ok {
+        return true;
+    }
+    if name == "AllMiniLML6V2" {
+        return legacy_sentinel().map(|p| p.exists()).unwrap_or(false);
+    }
+    false
 }
 
-fn mark_bert_cached() {
-    if let Some(path) = bert_sentinel() {
+fn mark_model_cached(name: &str) {
+    if let Some(path) = model_sentinel(name) {
         if let Some(parent) = path.parent() {
             let _ = std::fs::create_dir_all(parent);
         }
@@ -95,13 +229,15 @@ fn mark_bert_cached() {
 fn load_model(name: &str) -> anyhow::Result<fastembed::TextEmbedding> {
     use fastembed::{EmbeddingModel, InitOptions, TextEmbedding};
 
-    if !bert_is_cached() {
-        eprintln!("[panda] downloading BERT model ({}, one-time setup)...", name);
+    if !model_is_cached(name) {
+        eprintln!("[panda] downloading embedding model ({}, one-time setup)...", name);
         eprintln!("[panda] this may take a minute. future runs are instant.");
     }
 
     let embedding_model = match name {
         "AllMiniLML12V2" => EmbeddingModel::AllMiniLML12V2,
+        "BGESmallENV15" => EmbeddingModel::BGESmallENV15,
+        "MxbaiEmbedLargeV1" => EmbeddingModel::MxbaiEmbedLargeV1,
         _ => EmbeddingModel::AllMiniLML6V2,
     };
 
@@ -109,13 +245,16 @@ fn load_model(name: &str) -> anyhow::Result<fastembed::TextEmbedding> {
         .map(|h| std::path::PathBuf::from(h).join(".local/share/ccr/fastembed"))
         .unwrap_or_else(|_| std::path::PathBuf::from(".fastembed_cache"));
 
+    let providers = select_execution_providers();
+
     let model = TextEmbedding::try_new(
         InitOptions::new(embedding_model)
             .with_cache_dir(cache_dir)
+            .with_execution_providers(providers)
             .with_show_download_progress(false),
     )?;
 
-    mark_bert_cached();
+    mark_model_cached(name);
     Ok(model)
 }
 

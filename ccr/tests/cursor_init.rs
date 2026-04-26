@@ -25,7 +25,7 @@ fn cursor_script(home: &TempDir) -> PathBuf {
 fn run_cursor_init(home: &TempDir) {
     fs::create_dir_all(home.path().join(".cursor")).unwrap();
     ccr()
-        .args(["init", "--agent", "cursor"])
+        .args(["init", "--agent", "cursor", "--skip-model"])
         .env("HOME", home.path())
         .assert()
         .success();
@@ -198,7 +198,7 @@ fn test_claude_init_unaffected() {
     let home = TempDir::new().unwrap();
 
     ccr()
-        .args(["init"])
+        .args(["init", "--skip-model"])
         .env("HOME", home.path())
         .assert()
         .success();
