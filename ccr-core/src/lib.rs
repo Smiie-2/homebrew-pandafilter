@@ -13,6 +13,7 @@ pub mod sentence;
 pub mod simhash;
 pub mod stacktrace;
 pub mod structure_map;
+pub mod ov_embed;
 pub mod summarizer;
 pub mod tokens;
 pub mod whitespace;

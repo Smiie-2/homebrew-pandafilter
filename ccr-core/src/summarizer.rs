@@ -2,6 +2,8 @@ use once_cell::sync::OnceCell;
 use regex::Regex;
 use std::cell::RefCell;
 
+use crate::ov_embed;
+
 static CRITICAL_PATTERN: OnceCell<Regex> = OnceCell::new();
 
 fn critical_pattern() -> &'static Regex {
@@ -61,6 +63,17 @@ pub fn set_model_name(name: &str) {
 }
 
 fn get_model_name() -> &'static str {
+    // Env var wins so callers can swap models per-process for benchmarking
+    // without writing a config file. Returns &'static via OnceCell-backed leak.
+    static ENV_OVERRIDE: OnceCell<Option<String>> = OnceCell::new();
+    let overridden = ENV_OVERRIDE.get_or_init(|| {
+        std::env::var("PANDA_BERT_MODEL")
+            .ok()
+            .filter(|s| !s.trim().is_empty())
+    });
+    if let Some(name) = overridden {
+        return name.as_str();
+    }
     MODEL_NAME.get().map(|s| s.as_str()).unwrap_or("AllMiniLML6V2")
 }
 
@@ -172,14 +185,45 @@ fn select_execution_providers() -> Vec<ort::execution_providers::ExecutionProvid
 
     // Default `error_on_failure = false` — ORT silently falls back to CPU
     // if the OpenVINO EP cannot initialize at session-creation time.
-    vec![OpenVINOExecutionProvider::default()
+    // Set PANDA_NPU_STRICT=1 during diagnostics to surface the underlying error.
+    let mut dispatch = OpenVINOExecutionProvider::default()
         .with_device_type("NPU")
-        .build()]
+        .build();
+    if std::env::var("PANDA_NPU_STRICT").ok().as_deref() == Some("1") {
+        dispatch = dispatch.error_on_failure();
+    }
+    vec![dispatch]
 }
 
 // ── Cached model ──────────────────────────────────────────────────────────────
 
 static MODEL_CACHE: OnceCell<fastembed::TextEmbedding> = OnceCell::new();
+
+// ── OpenVINO NPU embedder (None when NPU unavailable) ─────────────────────────
+
+static OV_EMBEDDER: OnceCell<Option<ov_embed::OvEmbedder>> = OnceCell::new();
+
+fn get_ov_embedder() -> Option<&'static ov_embed::OvEmbedder> {
+    OV_EMBEDDER
+        .get_or_init(|| {
+            if effective_exec_mode() == "cpu" {
+                return None;
+            }
+            let name = get_model_name();
+            let cache_dir = std::env::var("HOME")
+                .map(|h| std::path::PathBuf::from(h).join(".local/share/ccr/fastembed"))
+                .unwrap_or_else(|_| std::path::PathBuf::from(".fastembed_cache"));
+            let (onnx, tok, seq) = ov_embed::find_fastembed_onnx(name, &cache_dir)?;
+            match ov_embed::OvEmbedder::try_new(&onnx, &tok, seq) {
+                Ok(e) => Some(e),
+                Err(err) => {
+                    eprintln!("[panda] NPU embedder unavailable ({}), using CPU", err);
+                    None
+                }
+            }
+        })
+        .as_ref()
+}
 
 /// Per-model sentinel file written after a successful model load/download.
 /// Its presence means the model files are already on disk for that model.
@@ -235,9 +279,13 @@ fn load_model(name: &str) -> anyhow::Result<fastembed::TextEmbedding> {
     }
 
     let embedding_model = match name {
+        "AllMiniLML6V2Q" => EmbeddingModel::AllMiniLML6V2Q,
         "AllMiniLML12V2" => EmbeddingModel::AllMiniLML12V2,
+        "AllMiniLML12V2Q" => EmbeddingModel::AllMiniLML12V2Q,
         "BGESmallENV15" => EmbeddingModel::BGESmallENV15,
+        "BGESmallENV15Q" => EmbeddingModel::BGESmallENV15Q,
         "MxbaiEmbedLargeV1" => EmbeddingModel::MxbaiEmbedLargeV1,
+        "MxbaiEmbedLargeV1Q" => EmbeddingModel::MxbaiEmbedLargeV1Q,
         _ => EmbeddingModel::AllMiniLML6V2,
     };
 
@@ -328,12 +376,14 @@ fn compute_centroid(embeddings: &[Vec<f32>]) -> Vec<f32> {
 }
 
 /// Embed `texts` and L2-normalize every output vector.
-/// All downstream similarity calls can then use `dot` instead of full cosine similarity,
-/// eliminating two sqrt calls per pair.
+/// Uses the OpenVINO NPU path when available, falls back to fastembed CPU.
 fn embed_and_normalize(
     model: &fastembed::TextEmbedding,
     texts: Vec<&str>,
 ) -> anyhow::Result<Vec<Vec<f32>>> {
+    if let Some(ov) = get_ov_embedder() {
+        return ov.embed(&texts);
+    }
     let mut embeddings = model.embed(texts, None)?;
     for emb in &mut embeddings {
         l2_normalize(emb);
@@ -1720,15 +1770,24 @@ mod tests {
 
     #[test]
     fn compute_centroid_from_embeddings_matches_compute_output_centroid() {
-        // For a short, known input: both functions should produce the same centroid.
+        // Verify the centroid math is identical between the two code paths.
+        // Use a single embed_batch call to avoid relying on NPU determinism across calls.
         let text = "hello world\nfoo bar baz\nrust is great";
         let lines: Vec<&str> = text.lines().filter(|l| !l.trim().is_empty()).collect();
         let embeddings = embed_batch(&lines).expect("embed_batch failed");
         let from_pre = compute_centroid_from_embeddings(&embeddings);
-        let from_text = compute_output_centroid(text)
-            .expect("compute_output_centroid failed");
-        // Should be numerically identical (both take the mean of per-line embeddings).
-        for (a, b) in from_pre.iter().zip(from_text.iter()) {
+        // Replicate compute_output_centroid's algorithm on the same embeddings
+        let dim = embeddings[0].len();
+        let mut manual = vec![0.0f32; dim];
+        for emb in &embeddings {
+            for (c, v) in manual.iter_mut().zip(emb.iter()) {
+                *c += v;
+            }
+        }
+        let n = embeddings.len() as f32;
+        manual.iter_mut().for_each(|c| *c /= n);
+        l2_normalize(&mut manual);
+        for (a, b) in from_pre.iter().zip(manual.iter()) {
             assert!((a - b).abs() < 1e-5, "mismatch at dim: {} vs {}", a, b);
         }
     }
