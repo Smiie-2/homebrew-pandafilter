@@ -1,5 +1,6 @@
 mod bench;
 mod bench_report;
+mod embed_bench;
 mod runner;
 mod report;
 
@@ -33,21 +34,19 @@ fn main() -> Result<()> {
         return Ok(());
     }
 
+    // ── Embedder-quality bench: panda-eval --embed-bench ────────────────────
+    if args.iter().any(|a| a == "--embed-bench") {
+        let fixtures_dir = resolve_fixtures_dir();
+        let report = embed_bench::run(&fixtures_dir)?;
+        let bench_dir = bench_dir();
+        embed_bench::print_and_save(&report, &bench_dir)?;
+        return Ok(());
+    }
+
     // ── Default: pipeline / conversation eval ────────────────────────────────
     // Uses the `claude` CLI (OAuth) for scoring. No API key needed.
 
-    let fixtures_dir = std::path::PathBuf::from(
-        std::env::var("PANDA_FIXTURES_DIR")
-            .unwrap_or_else(|_| {
-                let exe = std::env::current_exe().unwrap();
-                exe.parent().unwrap()
-                    .parent().unwrap()
-                    .parent().unwrap()
-                    .join("panda-eval/fixtures")
-                    .to_string_lossy()
-                    .into_owned()
-            })
-    );
+    let fixtures_dir = resolve_fixtures_dir();
 
     println!("PandaFilter Evaluation Report");
     println!("=====================");
@@ -100,6 +99,26 @@ fn main() -> Result<()> {
     }
 
     Ok(())
+}
+
+fn resolve_fixtures_dir() -> std::path::PathBuf {
+    if let Ok(dir) = std::env::var("PANDA_FIXTURES_DIR") {
+        return std::path::PathBuf::from(dir);
+    }
+    let exe = std::env::current_exe().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let mut dir = exe.as_path();
+    for _ in 0..4 {
+        if let Some(parent) = dir.parent() {
+            dir = parent;
+            let candidate = dir.join("ccr-eval/fixtures");
+            if candidate.exists() {
+                return candidate;
+            }
+        }
+    }
+    std::env::current_dir()
+        .unwrap_or_else(|_| std::path::PathBuf::from("."))
+        .join("ccr-eval/fixtures")
 }
 
 /// Locate the benchmark directory relative to this binary.
