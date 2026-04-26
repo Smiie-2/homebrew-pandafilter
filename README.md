@@ -43,11 +43,11 @@ curl -fsSL https://raw.githubusercontent.com/AssafWoo/homebrew-pandafilter/main/
 >
 > | Value | Size | Notes |
 > |---|---|---|
-> | `AllMiniLML6V2` (default) | ~90 MB | 384-dim, fastest |
-> | `BGESmallENV15` | ~130 MB | 384-dim, stronger retrieval quality |
-> | `MxbaiEmbedLargeV1` | ~670 MB | 1024-dim, best quality |
+> | `AllMiniLML6V2` (default) | ~90 MB | 384-dim, fastest. Recommended on both CPU and NPU. |
+> | `BGESmallENV15` | ~130 MB | 384-dim, stronger retrieval quality. Slower; benchmark before switching, especially on NPU. |
+> | `MxbaiEmbedLargeV1` | ~670 MB | 1024-dim, best quality. CPU-only in practice — too heavy for the NPU. |
 >
-> **Intel NPU acceleration (Meteor Lake / Core Ultra):** Set `execution_provider = "npu"` in `panda.toml` (or `PANDA_NPU=npu` in the env). Requires an OpenVINO-EP-enabled `libonnxruntime.so` — drop it at `~/.local/share/ccr/onnxruntime/libonnxruntime.so` (replacing the CPU one) or set `ORT_DYLIB_PATH=/path/to/libonnxruntime.so`. Without those, `auto` (the default) silently uses CPU; `npu` warns once and falls back.
+> **Intel NPU acceleration (Meteor Lake / Core Ultra):** Set `execution_provider = "npu"` in `panda.toml` (or `PANDA_NPU=npu` in the env). Requires `libopenvino_c.so` (the OpenVINO C runtime) at `~/.local/share/ccr/onnxruntime/` (the Linux installer drops it there) or pointed to via `OPENVINO_LIB_PATH=/path/to/libopenvino_c.so`. The NPU compiles the model once per (model, OV version, driver) combination and caches the compiled blob at `~/.cache/panda/openvino/` — first run takes a few seconds, subsequent runs load in well under a second. Without an NPU available, `auto` (the default) silently uses CPU; `npu` warns once and falls back.
 
 Then wire it in — one command installs for every AI agent you have:
 
