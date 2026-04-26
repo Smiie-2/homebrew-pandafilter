@@ -284,7 +284,14 @@ pub fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
 /// (cherry-pick, merge, rebase, am/apply).  Uses only filesystem stats —
 /// no subprocess, no latency.
 pub fn mid_git_operation() -> bool {
-    let Ok(mut dir) = std::env::current_dir() else { return false };
+    let Ok(dir) = std::env::current_dir() else { return false };
+    mid_git_operation_in(&dir)
+}
+
+/// Same as [`mid_git_operation`] but walks upward from `start` instead of
+/// the process CWD.  Useful in tests to avoid mutating the global CWD.
+pub fn mid_git_operation_in(start: &std::path::Path) -> bool {
+    let mut dir = start.to_path_buf();
     loop {
         let git = dir.join(".git");
         if git.exists() {
