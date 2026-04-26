@@ -958,8 +958,8 @@ mod tests {
     }
 
     /// Proves the fix: mid_git_operation() passthrough returns full content.
-    /// We simulate the guard by calling the raw passthrough logic on a temp dir
-    /// that has a CHERRY_PICK_HEAD file, then verify the full content is returned.
+    /// Uses mid_git_operation_in() with a temp path — avoids mutating the
+    /// global CWD, which is not thread-safe under parallel test execution.
     #[test]
     fn test_passthrough_full_when_cherry_pick_head_present() {
         use std::fs;
@@ -973,11 +973,8 @@ mod tests {
         // Build a 200-line file with the change at line 100.
         let (content, marker) = make_large_file(200, 100);
 
-        // Run mid_git_operation() detection with the temp dir as CWD.
-        let original_dir = std::env::current_dir().unwrap();
-        std::env::set_current_dir(tmp.path()).unwrap();
-        let is_mid = crate::handlers::util::mid_git_operation();
-        std::env::set_current_dir(original_dir).unwrap();
+        // Use mid_git_operation_in() so we don't touch the global CWD.
+        let is_mid = crate::handlers::util::mid_git_operation_in(tmp.path());
 
         assert!(is_mid, "should detect CHERRY_PICK_HEAD as mid-operation");
 

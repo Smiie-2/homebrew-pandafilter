@@ -113,12 +113,45 @@ fn process_bash(hook_input: HookInput) -> Result<Option<String>> {
         return Ok(None);
     }
 
+    // Resolve the effective command for attribution:
+    // 1. Skip leading comment/blank lines — e.g. "# check status\ngit status" → "git status"
+    // 2. Strip no-output prefixes — e.g. "sleep 2 && cargo test" → "cargo test"
+    // This ensures the right handler is selected and analytics are attributed correctly.
+    let effective_cmd: &str = {
+        let first_real = full_cmd.lines()
+            .map(str::trim)
+            .find(|l| !l.is_empty() && !l.starts_with('#'))
+            .unwrap_or(full_cmd.trim());
+
+        // If line starts with a no-output command and has && or ; separator, skip past it.
+        let first_word_base = first_real
+            .split_whitespace()
+            .next()
+            .map(|w| std::path::Path::new(w).file_name()
+                .and_then(|n| n.to_str()).unwrap_or(w))
+            .unwrap_or("");
+
+        if is_no_output_cmd(first_word_base) {
+            if let Some(pos) = first_real.find("&&") {
+                let after = first_real[pos + 2..].trim();
+                if !after.is_empty() { after } else { first_real }
+            } else if let Some(pos) = first_real.find(';') {
+                let after = first_real[pos + 1..].trim();
+                if !after.is_empty() && !after.starts_with('#') { after } else { first_real }
+            } else {
+                first_real
+            }
+        } else {
+            first_real
+        }
+    };
+
     // If command was rewritten by a wrapper (e.g. RTK: "rtk git status"),
     // attribute analytics to the real underlying command, not the wrapper.
     // Also normalize full paths to basename: "/usr/bin/git" → "git".
     // Skip leading KEY=VALUE env var assignments (e.g. "GIT_COMMITTER_NAME=Assaf git commit").
     let command_hint = {
-        let mut tokens = full_cmd.split_whitespace()
+        let mut tokens = effective_cmd.split_whitespace()
             .skip_while(|t| {
                 let eq = t.find('=').unwrap_or(0);
                 eq > 0 && t[..eq].chars().all(|c| c.is_ascii_uppercase() || c == '_')
@@ -136,6 +169,12 @@ fn process_bash(hook_input: HookInput) -> Result<Option<String>> {
             .unwrap_or(real);
         if basename.is_empty() { None } else { Some(basename.to_string()) }
     };
+
+    // Also catch full-path panda invocations like "/home/user/.cargo/bin/panda gain"
+    // that don't start with the literal string "panda ".
+    if command_hint.as_deref() == Some("panda") {
+        return Ok(None);
+    }
 
     let output_text = if let Some(err) = &hook_input.tool_response.error {
         err.clone()
@@ -211,12 +250,13 @@ fn process_bash(hook_input: HookInput) -> Result<Option<String>> {
     // cmd_key for session tracking: skip leading KEY=VALUE env vars and wrapper prefix.
     // "GIT_COMMITTER_NAME=Assaf git commit -m foo" → "git commit"
     // "rtk git status" → "git status"
+    // Uses effective_cmd (comment-skipped, no-output-prefix-stripped) for consistency.
     let cmd_key: String = {
         fn is_env_assign(t: &&str) -> bool {
             let eq = t.find('=').unwrap_or(0);
             eq > 0 && t[..eq].chars().all(|c| c.is_ascii_uppercase() || c == '_')
         }
-        let mut real_tokens = full_cmd.split_whitespace().skip_while(is_env_assign);
+        let mut real_tokens = effective_cmd.split_whitespace().skip_while(is_env_assign);
         let first = real_tokens.next().unwrap_or("");
         let rest: Vec<&str> = real_tokens.collect();
         let real_iter: Box<dyn Iterator<Item = &str>> = if first == "rtk" {
