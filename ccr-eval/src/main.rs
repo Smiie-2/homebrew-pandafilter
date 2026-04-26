@@ -34,8 +34,7 @@ fn main() -> Result<()> {
     }
 
     // ── Default: pipeline / conversation eval ────────────────────────────────
-    let api_key = std::env::var("ANTHROPIC_API_KEY")
-        .expect("ANTHROPIC_API_KEY must be set");
+    // Uses the `claude` CLI (OAuth) for scoring. No API key needed.
 
     let fixtures_dir = std::path::PathBuf::from(
         std::env::var("PANDA_FIXTURES_DIR")
@@ -65,7 +64,7 @@ fn main() -> Result<()> {
         for (txt_path, qa_path) in &fixture_pairs {
             let fixture_name = txt_path.file_stem().unwrap().to_string_lossy().into_owned();
             println!("Running fixture: {}", fixture_name);
-            match runner::run_fixture(txt_path, qa_path, &api_key) {
+            match runner::run_fixture(txt_path, qa_path) {
                 Ok(result) => {
                     report::print_fixture_result(&result);
                     pipeline_results.push(result);
@@ -88,7 +87,7 @@ fn main() -> Result<()> {
         for path in &conv_paths {
             let name = path.file_name().unwrap().to_string_lossy().replace(".conv.toml", "");
             println!("Running fixture: {}", name);
-            match runner::run_conv_fixture_compare(path, &api_key) {
+            match runner::run_conv_fixture_compare(path) {
                 Ok(result) => {
                     report::print_conv_compare_result(&result);
                     compare_results.push(result);

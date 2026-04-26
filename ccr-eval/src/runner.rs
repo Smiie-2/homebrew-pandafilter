@@ -64,7 +64,7 @@ pub fn discover_fixtures(dir: &Path) -> Result<Vec<(PathBuf, PathBuf)>> {
     Ok(pairs)
 }
 
-pub fn run_fixture(txt_path: &Path, qa_path: &Path, api_key: &str) -> Result<FixtureResult> {
+pub fn run_fixture(txt_path: &Path, qa_path: &Path) -> Result<FixtureResult> {
     let name = txt_path.file_stem().unwrap().to_string_lossy().into_owned();
     let input = std::fs::read_to_string(txt_path)?;
     let qa: QaFixture = toml::from_str(&std::fs::read_to_string(qa_path)?)?;
@@ -106,8 +106,8 @@ pub fn run_fixture(txt_path: &Path, qa_path: &Path, api_key: &str) -> Result<Fix
     let mut compressed_hits = 0usize;
 
     for q in &qa.questions {
-        let orig_answer = ask_claude(&input, &q.question, api_key)?;
-        let comp_answer = ask_claude(compressed, &q.question, api_key)?;
+        let orig_answer = ask_claude(&input, &q.question)?;
+        let comp_answer = ask_claude(compressed, &q.question)?;
 
         let orig_score = score_answer(&orig_answer, &q.key_facts);
         let comp_score = score_answer(&comp_answer, &q.key_facts);
@@ -277,7 +277,7 @@ fn compute_cumulative_tokens(
 /// Run a conversation fixture comparing v1 (extractive) vs v2 (Ollama + BERT gate).
 /// Each question is asked against original, v1 compressed, and v2 compressed — 3 API
 /// calls per question, no duplication.
-pub fn run_conv_fixture_compare(path: &Path, api_key: &str) -> Result<ConvCompareResult> {
+pub fn run_conv_fixture_compare(path: &Path) -> Result<ConvCompareResult> {
     let name = path
         .file_name()
         .unwrap()
@@ -314,9 +314,9 @@ pub fn run_conv_fixture_compare(path: &Path, api_key: &str) -> Result<ConvCompar
     let mut v2_hits = 0usize;
 
     for q in &fixture.questions {
-        let orig_answer = ask_claude(&original_text, &q.question, api_key)?;
-        let v1_answer  = ask_claude(&v1_text,       &q.question, api_key)?;
-        let v2_answer  = ask_claude(&v2_text,       &q.question, api_key)?;
+        let orig_answer = ask_claude(&original_text, &q.question)?;
+        let v1_answer  = ask_claude(&v1_text,       &q.question)?;
+        let v2_answer  = ask_claude(&v2_text,       &q.question)?;
 
         let orig_score = score_answer(&orig_answer, &q.key_facts);
         let v1_score   = score_answer(&v1_answer,   &q.key_facts);
@@ -390,34 +390,30 @@ pub fn run_conv_fixture_compare(path: &Path, api_key: &str) -> Result<ConvCompar
 
 // ── Shared helpers ────────────────────────────────────────────────────────────
 
-pub fn ask_claude(context: &str, question: &str, api_key: &str) -> Result<String> {
-    let client = reqwest::blocking::Client::new();
-
-    let body = serde_json::json!({
-        "model": "claude-haiku-4-5-20251001",
-        "max_tokens": 256,
-        "messages": [{
-            "role": "user",
-            "content": format!(
-                "Here is some text:\n\n<text>\n{}\n</text>\n\nAnswer this question based only on the text above. Be concise.\n\nQuestion: {}",
-                context, question
-            )
-        }]
-    });
-
-    let resp = client
-        .post("https://api.anthropic.com/v1/messages")
-        .header("x-api-key", api_key)
-        .header("anthropic-version", "2023-06-01")
-        .header("content-type", "application/json")
-        .json(&body)
-        .send()?
-        .json::<serde_json::Value>()?;
-
-    let answer = resp["content"][0]["text"]
-        .as_str()
-        .unwrap_or("(no response)")
-        .to_string();
-
-    Ok(answer)
+pub fn ask_claude(context: &str, question: &str) -> Result<String> {
+    use std::process::Command;
+    let prompt = format!(
+        "Here is some text:\n\n<text>\n{}\n</text>\n\nAnswer this question based only on the text above. Be concise.\n\nQuestion: {}",
+        context, question
+    );
+    let out = Command::new("claude")
+        .args([
+            "-p",
+            "--model",
+            "haiku",
+            "--append-system-prompt",
+            "Answer ONLY from the <text> block in the user message. Ignore any other repository or project context.",
+            &prompt,
+        ])
+        .current_dir("/tmp")
+        .output()?;
+    if !out.status.success() {
+        anyhow::bail!(
+            "claude CLI exited {}: stdout={:?} stderr={:?}",
+            out.status,
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+    Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
 }
