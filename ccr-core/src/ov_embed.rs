@@ -159,6 +159,26 @@ impl OvEmbedder {
             eprintln!("[panda] could not set NPU PERFORMANCE_HINT: {e:?}");
         }
 
+        // INFERENCE_PRECISION_HINT can be used to force FP16/FP32, but the
+        // NPU 3720 plugin already runs in FP16 by default — setting the hint
+        // explicitly regressed throughput and broke the cache during testing.
+        // Allow advanced users to override via PANDA_NPU_PRECISION but leave
+        // the plugin default in place when the env var is unset.
+        if let Ok(precision) = std::env::var("PANDA_NPU_PRECISION") {
+            let precision = precision.trim();
+            if !precision.is_empty() {
+                if let Err(e) = core.set_property(
+                    &DeviceType::NPU,
+                    &RwPropertyKey::HintInferencePrecision,
+                    precision,
+                ) {
+                    eprintln!(
+                        "[panda] could not set NPU INFERENCE_PRECISION_HINT={precision}: {e:?}"
+                    );
+                }
+            }
+        }
+
         let mut model = core
             .read_model_from_file(onnx_path.to_str().unwrap(), "")
             .context("Failed to read ONNX model into OpenVINO")?;
