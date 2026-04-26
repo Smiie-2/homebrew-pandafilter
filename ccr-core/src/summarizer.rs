@@ -303,6 +303,7 @@ fn load_model(name: &str) -> anyhow::Result<fastembed::TextEmbedding> {
         "BGESmallENV15Q" => EmbeddingModel::BGESmallENV15Q,
         "MxbaiEmbedLargeV1" => EmbeddingModel::MxbaiEmbedLargeV1,
         "MxbaiEmbedLargeV1Q" => EmbeddingModel::MxbaiEmbedLargeV1Q,
+        "JinaEmbeddingsV2BaseCode" => EmbeddingModel::JinaEmbeddingsV2BaseCode,
         _ => EmbeddingModel::AllMiniLML6V2,
     };
 

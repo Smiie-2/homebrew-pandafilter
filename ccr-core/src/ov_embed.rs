@@ -76,6 +76,8 @@ pub fn model_onnx_info(model_name: &str) -> Option<(&'static str, &'static str, 
             Some(("mixedbread-ai/mxbai-embed-large-v1", "onnx/model_quantized.onnx", 512)),
         "SnowflakeArcticEmbedXS" =>
             Some(("Snowflake/snowflake-arctic-embed-xs", "onnx/model.onnx", 512)),
+        "JinaEmbeddingsV2BaseCode" =>
+            Some(("jinaai/jina-embeddings-v2-base-code", "onnx/model.onnx", 8192)),
         _ => None,
     }
 }
