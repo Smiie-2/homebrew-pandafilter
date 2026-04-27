@@ -4,7 +4,7 @@ use std::time::Instant;
 fn main() {
     let mut text = String::new();
     std::io::stdin().read_to_string(&mut text).unwrap();
-    let model = std::env::var("PANDA_BERT_MODEL").unwrap_or_else(|_| "AllMiniLML6V2".into());
+    let model = std::env::var("PANDA_BERT_MODEL").unwrap_or_else(|_| "SnowflakeArcticEmbedMV2".into());
     let mode = std::env::var("PANDA_NPU").unwrap_or_else(|_| "auto".into());
     let runs: usize = std::env::var("PANDA_BENCH_RUNS")
         .ok()

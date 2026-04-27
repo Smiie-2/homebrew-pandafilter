@@ -56,9 +56,10 @@ static MODEL_NAME: OnceCell<String> = OnceCell::new();
 
 /// Set the embedding model name to use. Must be called before the first summarization.
 /// First call wins (subsequent calls are no-ops).
-/// Valid values: "AllMiniLML6V2" (default, ~90MB), "AllMiniLML12V2" (~120MB),
-/// "BGESmallENV15" (~130MB, better quality), "MxbaiEmbedLargeV1" (~670MB, best quality),
-/// "SnowflakeArcticEmbedXS" (~90MB, 6-layer BERT, 384-dim, MTEB-tuned).
+/// Valid values: "SnowflakeArcticEmbedMV2" (default, ~1.2GB, top of embed-bench),
+/// "AllMiniLML6V2" (~90MB, prior default), "AllMiniLML12V2" (~120MB),
+/// "BGESmallENV15" (~130MB), "MxbaiEmbedLargeV1" (~670MB),
+/// "SnowflakeArcticEmbedXS" (~90MB), "JinaEmbeddingsV2BaseCode" (~320MB, code-trained).
 pub fn set_model_name(name: &str) {
     let _ = MODEL_NAME.set(name.to_string());
 }
@@ -75,7 +76,7 @@ fn get_model_name() -> &'static str {
     if let Some(name) = overridden {
         return name.as_str();
     }
-    MODEL_NAME.get().map(|s| s.as_str()).unwrap_or("AllMiniLML6V2")
+    MODEL_NAME.get().map(|s| s.as_str()).unwrap_or("SnowflakeArcticEmbedMV2")
 }
 
 /// Public read accessor — used by callers (e.g. the focus indexer) that want

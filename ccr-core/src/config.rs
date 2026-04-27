@@ -72,14 +72,14 @@ pub struct GlobalConfig {
     pub hard_keep_patterns: Vec<String>,
     /// Embedding model to use for semantic summarization.
     /// Options:
-    ///   - "AllMiniLML6V2"     (default, ~90MB)
+    ///   - "SnowflakeArcticEmbedMV2" (default, ~1.2GB, 768-dim, top of embed-bench)
+    ///   - "AllMiniLML6V2"     (~90MB, prior default, lightweight)
     ///   - "AllMiniLML12V2"    (~120MB)
-    ///   - "BGESmallENV15"     (~130MB, stronger retrieval quality, 384-dim)
-    ///   - "MxbaiEmbedLargeV1" (~670MB, best quality, 1024-dim)
-    ///   - "SnowflakeArcticEmbedXS" (~90MB, 6-layer BERT, 384-dim, MTEB-tuned)
+    ///   - "BGESmallENV15"     (~130MB, 384-dim)
+    ///   - "MxbaiEmbedLargeV1" (~670MB, 1024-dim)
+    ///   - "SnowflakeArcticEmbedXS" (~90MB, 6-layer BERT, 384-dim)
     ///   - "JinaEmbeddingsV2BaseCode" (~320MB, 768-dim, code-trained, 8K context)
     ///   - "NomicEmbedTextV15" (~550MB, 768-dim, general English, 8K context)
-    ///   - "SnowflakeArcticEmbedMV2" (~1.2GB, 768-dim, multilingual+code, 8K context)
     /// First call wins — changing this requires restarting the process.
     #[serde(default = "default_bert_model")]
     pub bert_model: String,
@@ -130,7 +130,7 @@ fn default_output_char_cap() -> usize {
 }
 
 fn default_bert_model() -> String {
-    "AllMiniLML6V2".to_string()
+    "SnowflakeArcticEmbedMV2".to_string()
 }
 
 fn default_execution_provider() -> String {
