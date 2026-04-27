@@ -82,6 +82,18 @@ pub fn model_onnx_info(model_name: &str) -> Option<(&'static str, &'static str, 
             Some(("jinaai/jina-embeddings-v2-base-code", "onnx/model.onnx", 8192)),
         "NomicEmbedTextV15" =>
             Some(("nomic-ai/nomic-embed-text-v1.5", "onnx/model.onnx", 8192)),
+        "BGEBaseENV15" =>
+            Some(("Xenova/bge-base-en-v1.5", "onnx/model.onnx", 512)),
+        "BGELargeENV15" =>
+            Some(("Xenova/bge-large-en-v1.5", "onnx/model.onnx", 512)),
+        "GTEBaseENV15" =>
+            Some(("Alibaba-NLP/gte-base-en-v1.5", "onnx/model.onnx", 8192)),
+        "GTELargeENV15" =>
+            Some(("Alibaba-NLP/gte-large-en-v1.5", "onnx/model.onnx", 8192)),
+        "ModernBertEmbedLarge" =>
+            Some(("lightonai/modernbert-embed-large", "onnx/model.onnx", 8192)),
+        "MultilingualE5Base" =>
+            Some(("intfloat/multilingual-e5-base", "onnx/model.onnx", 512)),
         _ => None,
     }
 }

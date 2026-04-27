@@ -306,6 +306,12 @@ fn load_model(name: &str) -> anyhow::Result<fastembed::TextEmbedding> {
         "JinaEmbeddingsV2BaseCode" => EmbeddingModel::JinaEmbeddingsV2BaseCode,
         "NomicEmbedTextV15" => EmbeddingModel::NomicEmbedTextV15,
         "NomicEmbedTextV15Q" => EmbeddingModel::NomicEmbedTextV15Q,
+        "BGEBaseENV15" => EmbeddingModel::BGEBaseENV15,
+        "BGELargeENV15" => EmbeddingModel::BGELargeENV15,
+        "GTEBaseENV15" => EmbeddingModel::GTEBaseENV15,
+        "GTELargeENV15" => EmbeddingModel::GTELargeENV15,
+        "ModernBertEmbedLarge" => EmbeddingModel::ModernBertEmbedLarge,
+        "MultilingualE5Base" => EmbeddingModel::MultilingualE5Base,
         _ => EmbeddingModel::AllMiniLML6V2,
     };
 
