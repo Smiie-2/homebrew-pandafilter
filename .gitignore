@@ -2,6 +2,7 @@
 target/
 **/.fastembed_cache/
 *.log
-ccr-eval/benchmarks/reports/
+ccr-eval/benchmarks/reports/sigmap-reference.json
+ccr-eval/benchmarks/reports/retrieval-baseline.json
 ccr-eval/benchmarks/indexes/
 ccr-eval/benchmarks/repos/
