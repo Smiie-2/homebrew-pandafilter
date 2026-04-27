@@ -55,15 +55,18 @@ brew install pandafilter
 curl -fsSL https://raw.githubusercontent.com/AssafWoo/homebrew-pandafilter/main/install.sh | bash
 ```
 
-> **First run:** PandaFilter downloads the embedding model (default `all-MiniLM-L6-v2`, ~90 MB) from HuggingFace and caches it under `~/.local/share/ccr/fastembed/`. The Linux installer also drops a CPU `libonnxruntime.so` into `~/.local/share/ccr/onnxruntime/`. Subsequent runs are instant.
+> **First run:** PandaFilter downloads the embedding model (default `snowflake-arctic-embed-m-v2.0`, ~1.2 GB) from HuggingFace and caches it under `~/.local/share/ccr/fastembed/`. The Linux installer also drops a CPU `libonnxruntime.so` into `~/.local/share/ccr/onnxruntime/`. Subsequent runs are instant.
 >
-> **Choose a stronger model** by setting `bert_model` in `panda.toml`:
+> **Pick a smaller or different model** by setting `bert_model` in `panda.toml`:
 >
 > | Value | Size | Notes |
 > |---|---|---|
-> | `AllMiniLML6V2` (default) | ~90 MB | 384-dim, fastest. Recommended on both CPU and NPU. |
-> | `BGESmallENV15` | ~130 MB | 384-dim, stronger retrieval quality. Slower; benchmark before switching, especially on NPU. |
-> | `MxbaiEmbedLargeV1` | ~670 MB | 1024-dim, best quality. CPU-only in practice — too heavy for the NPU. |
+> | `SnowflakeArcticEmbedMV2` (default) | ~1.2 GB | 768-dim, 8K context, top of the in-tree embed-bench. CPU-only in practice — large model on NPU is unreliable on Meteor Lake. |
+> | `AllMiniLML6V2` | ~90 MB | 384-dim, fastest. Prior default. Pick this if disk size or download time matters and the +1.4 pp MRR isn't worth it. Solid on NPU. |
+> | `AllMiniLML12V2` | ~120 MB | 384-dim, slight quality bump over L6V2 at ~30% more disk. |
+> | `BGESmallENV15` | ~130 MB | 384-dim, similar quality to L6V2 here. |
+> | `JinaEmbeddingsV2BaseCode` | ~320 MB | 768-dim, code-trained, 8K context. Wins on code-heavy outputs, loses on prose. |
+> | `MxbaiEmbedLargeV1` | ~670 MB | 1024-dim. CPU-only in practice — too heavy for the NPU. |
 >
 > **Intel NPU acceleration (Meteor Lake / Core Ultra):** Set `execution_provider = "npu"` in `panda.toml` (or `PANDA_NPU=npu` in the env). Requires `libopenvino_c.so` (the OpenVINO C runtime) at `~/.local/share/ccr/onnxruntime/` (the Linux installer drops it there) or pointed to via `OPENVINO_LIB_PATH=/path/to/libopenvino_c.so`. The NPU compiles the model once per (model, OV version, driver) combination and caches the compiled blob at `~/.cache/panda/openvino/` — first run takes a few seconds, subsequent runs load in well under a second. Without an NPU available, `auto` (the default) silently uses CPU; `npu` warns once and falls back.
 

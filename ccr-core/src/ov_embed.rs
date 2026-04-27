@@ -74,6 +74,26 @@ pub fn model_onnx_info(model_name: &str) -> Option<(&'static str, &'static str, 
             Some(("mixedbread-ai/mxbai-embed-large-v1", "onnx/model.onnx", 512)),
         "MxbaiEmbedLargeV1Q" =>
             Some(("mixedbread-ai/mxbai-embed-large-v1", "onnx/model_quantized.onnx", 512)),
+        "SnowflakeArcticEmbedXS" =>
+            Some(("Snowflake/snowflake-arctic-embed-xs", "onnx/model.onnx", 512)),
+        "SnowflakeArcticEmbedMV2" =>
+            Some(("Snowflake/snowflake-arctic-embed-m-v2.0", "onnx/model.onnx", 8192)),
+        "JinaEmbeddingsV2BaseCode" =>
+            Some(("jinaai/jina-embeddings-v2-base-code", "onnx/model.onnx", 8192)),
+        "NomicEmbedTextV15" =>
+            Some(("nomic-ai/nomic-embed-text-v1.5", "onnx/model.onnx", 8192)),
+        "BGEBaseENV15" =>
+            Some(("Xenova/bge-base-en-v1.5", "onnx/model.onnx", 512)),
+        "BGELargeENV15" =>
+            Some(("Xenova/bge-large-en-v1.5", "onnx/model.onnx", 512)),
+        "GTEBaseENV15" =>
+            Some(("Alibaba-NLP/gte-base-en-v1.5", "onnx/model.onnx", 8192)),
+        "GTELargeENV15" =>
+            Some(("Alibaba-NLP/gte-large-en-v1.5", "onnx/model.onnx", 8192)),
+        "ModernBertEmbedLarge" =>
+            Some(("lightonai/modernbert-embed-large", "onnx/model.onnx", 8192)),
+        "MultilingualE5Base" =>
+            Some(("intfloat/multilingual-e5-base", "onnx/model.onnx", 512)),
         _ => None,
     }
 }
