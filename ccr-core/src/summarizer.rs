@@ -304,6 +304,8 @@ fn load_model(name: &str) -> anyhow::Result<fastembed::TextEmbedding> {
         "MxbaiEmbedLargeV1" => EmbeddingModel::MxbaiEmbedLargeV1,
         "MxbaiEmbedLargeV1Q" => EmbeddingModel::MxbaiEmbedLargeV1Q,
         "JinaEmbeddingsV2BaseCode" => EmbeddingModel::JinaEmbeddingsV2BaseCode,
+        "NomicEmbedTextV15" => EmbeddingModel::NomicEmbedTextV15,
+        "NomicEmbedTextV15Q" => EmbeddingModel::NomicEmbedTextV15Q,
         _ => EmbeddingModel::AllMiniLML6V2,
     };
 
@@ -328,6 +330,12 @@ fn user_defined_info(name: &str) -> Option<(&'static str, &'static str, usize, f
             "Snowflake/snowflake-arctic-embed-xs",
             "onnx/model.onnx",
             512,
+            fastembed::Pooling::Cls,
+        )),
+        "SnowflakeArcticEmbedMV2" => Some((
+            "Snowflake/snowflake-arctic-embed-m-v2.0",
+            "onnx/model.onnx",
+            8192,
             fastembed::Pooling::Cls,
         )),
         _ => None,
