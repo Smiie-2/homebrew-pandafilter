@@ -120,7 +120,23 @@ extern "C" fn sigterm_handler(_sig: libc::c_int) {
 }
 
 fn daemon_main(sock_path: PathBuf, pid_path: PathBuf) -> Result<()> {
+    use std::os::unix::io::AsRawFd;
+
     ensure_dir(&pid_path);
+
+    // Hold an exclusive flock on the PID file for the daemon's lifetime.
+    // If a concurrent `daemon start` races past start()'s liveness check
+    // (the window is wide — preload_model takes seconds), only one
+    // daemon_main wins the lock; the other exits silently. The kernel
+    // releases the lock on process death, so no cleanup is required.
+    let pid_lock = std::fs::OpenOptions::new()
+        .create(true)
+        .read(true)
+        .write(true)
+        .open(&pid_path)?;
+    if unsafe { libc::flock(pid_lock.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0 {
+        std::process::exit(0);
+    }
 
     let _ = std::fs::remove_file(&sock_path);
 
@@ -142,10 +158,12 @@ fn daemon_main(sock_path: PathBuf, pid_path: PathBuf) -> Result<()> {
     let listener = UnixListener::bind(&sock_path)?;
     unsafe { libc::umask(old_umask) };
 
-    // Write PID only after bind succeeds — otherwise a racing second
-    // `daemon start` would overwrite the live daemon's PID with its own
-    // (about-to-die) PID, leaving `stop` unable to find the running daemon.
+    // Write PID only after bind succeeds, so the file content is meaningful
+    // (the flock above guarantees mutual exclusion; this guarantees the
+    // recorded PID always belongs to a process that owns the socket).
     std::fs::write(&pid_path, format!("{}", std::process::id()))?;
+    // Keep the lock fd alive until process exit.
+    let _pid_lock = pid_lock;
     // Blocking listener — no busy-wait.
 
     // Self-pipe for async-signal-safe shutdown.
