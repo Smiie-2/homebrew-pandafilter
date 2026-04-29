@@ -70,13 +70,7 @@ fn apply_nice_once() {
     APPLIED.call_once(|| {
         if let Some(&level) = NICE_LEVEL.get() {
             if level > 0 {
-                unsafe {
-                    *libc::__errno_location() = 0;
-                    let ret = libc::nice(level);
-                    if ret == -1 && *libc::__errno_location() != 0 {
-                        eprintln!("[panda] warning: nice({}) failed", level);
-                    }
-                }
+                unsafe { libc::nice(level) };
             }
         }
     });

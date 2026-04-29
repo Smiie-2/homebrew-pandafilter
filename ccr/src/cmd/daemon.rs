@@ -129,13 +129,7 @@ fn daemon_main(sock_path: PathBuf, pid_path: PathBuf) -> Result<()> {
     if let Ok(config) = crate::config_loader::load_config() {
         #[cfg(unix)]
         if config.global.nice_level > 0 {
-            unsafe {
-                *libc::__errno_location() = 0;
-                let ret = libc::nice(config.global.nice_level);
-                if ret == -1 && *libc::__errno_location() != 0 {
-                    eprintln!("warning: nice({}) failed", config.global.nice_level);
-                }
-            }
+            unsafe { libc::nice(config.global.nice_level) };
         }
         panda_core::summarizer::set_model_name(&config.global.bert_model);
         panda_core::summarizer::set_ort_threads(config.global.ort_threads);
