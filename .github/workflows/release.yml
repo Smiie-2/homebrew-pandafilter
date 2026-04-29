@@ -101,6 +101,12 @@ jobs:
         env:
           PANDA_NO_BERT: "1"
         run: |
+          # Dynamic-linked ORT needs the dylib visible at runtime.
+          if [ -n "${ORT_LIB_LOCATION:-}" ]; then
+            export DYLD_LIBRARY_PATH="${ORT_LIB_LOCATION}:${DYLD_LIBRARY_PATH:-}"
+            export LD_LIBRARY_PATH="${ORT_LIB_LOCATION}:${LD_LIBRARY_PATH:-}"
+          fi
+
           BIN="./${{ matrix.asset_name }}"
 
           # x86_64-apple-darwin is cross-compiled on the ARM64 runner.
