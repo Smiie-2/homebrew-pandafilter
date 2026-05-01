@@ -375,6 +375,69 @@ pub fn preload_model() -> anyhow::Result<()> {
     Ok(())
 }
 
+// ── Raw OpenVINO bypass (opt-in via --features openvino) ─────────────────────
+
+#[cfg(feature = "openvino")]
+static OV_EMBEDDER: OnceCell<Option<crate::ov_embed::OvEmbedder>> = OnceCell::new();
+
+/// Lazily construct the OV embedder. Returns `None` (cached) on any failure
+/// or once `is_degraded()` flips. Idempotent and process-lifetime stable.
+#[cfg(feature = "openvino")]
+fn get_ov_embedder() -> Option<&'static crate::ov_embed::OvEmbedder> {
+    if crate::ov_embed::is_degraded() {
+        return None;
+    }
+    OV_EMBEDDER
+        .get_or_init(|| {
+            let name = get_model_name();
+            let (onnx, tok) = match resolve_model_files(name) {
+                Ok(v) => v,
+                Err(e) => {
+                    eprintln!("[panda] OV bypass: model fetch failed: {e}");
+                    return None;
+                }
+            };
+            let seq_len = match crate::ov_embed::model_seq_len(name) {
+                Some(s) => s,
+                None => {
+                    eprintln!(
+                        "[panda] OV bypass: no NPU seq_len for {name}; CPU fallback"
+                    );
+                    return None;
+                }
+            };
+            match crate::ov_embed::OvEmbedder::try_new(&onnx, &tok, seq_len) {
+                Ok(e) => {
+                    eprintln!("[panda] embedder: {} on NPU (raw OpenVINO)", name);
+                    Some(e)
+                }
+                Err(err) => {
+                    eprintln!("[panda] OV bypass init failed: {err}");
+                    None
+                }
+            }
+        })
+        .as_ref()
+}
+
+/// Eagerly construct the OV embedder. Used by `panda daemon start` so the
+/// multi-second NPU compile happens once at start, not on the first client
+/// embed call.
+///
+/// Returns `Some(())` on success, `None` if construction failed (in which
+/// case `OV_EMBEDDER` is cached as `None` and subsequent calls go to CPU).
+#[cfg(feature = "openvino")]
+pub fn preload_ov_embedder() -> Option<()> {
+    get_ov_embedder().map(|_| ())
+}
+
+/// Reports whether the OV embedder is currently active. Used by the smoke
+/// test to assert NPU was actually engaged (vs silent CPU fallback).
+#[cfg(feature = "openvino")]
+pub fn ov_embedder_is_active() -> bool {
+    OV_EMBEDDER.get().and_then(|o| o.as_ref()).is_some()
+}
+
 // ── Math helpers ──────────────────────────────────────────────────────────────
 
 /// L2-normalize `v` in-place. No-op for zero vectors.
